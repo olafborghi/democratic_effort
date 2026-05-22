@@ -2,7 +2,8 @@
 
 **Project:** *Is Democracy Worth the Effort? Seeing the Other Side as Willing Strengthens Pro-Democratic Motivation*
 
-Data and Code for two preregistered studies (total *N* = 916) using the **Pro-Democratic Effort Task** — a computational behavioral paradigm measuring US partisans' willingness to exert physical effort to support democratic engagement in areas associated with their own party (in-group), the opposing party (out-group), or across the US (Study 1 only). Hierarchical computational models estimate beneficiary-specific effort-discounting parameters (K) that separate motivation from decision noise.
+Data and Code for two preregistered studies (total *N* = 916) using the **Pro-Democratic Effort Task**, a computational behavioral paradigm measuring US partisans' willingness to exert effort to support democratic engagement in areas associated with their own party (in-group), the opposing party (out-group), or across the US (Study 1 only). 
+Hierarchical computational models estimate area-specific effort-discounting parameters (K) that separate motivation from decision noise.
 
 - **Study 1** (*N* = 284) validates the task and maps partisan differences and psychological correlates of pro-democratic effort.
 - **Study 2** (*N* = 632) tests whether correcting partisans' systematic underestimation of out-party effort willingness reduces in-group favoritism.
