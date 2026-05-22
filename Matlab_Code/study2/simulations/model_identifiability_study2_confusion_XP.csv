@@ -1,0 +1,7 @@
+Row,ms_two_k_one_beta,ms_two_k_one_beta_linear,ms_two_k_one_beta_hyperbolic,ms_two_k_two_beta,ms_two_k_two_beta_linear,ms_two_k_two_beta_hyperbolic
+ms_two_k_one_beta,7,0,0,3,0,0
+ms_two_k_one_beta_linear,0,10,0,0,0,0
+ms_two_k_one_beta_hyperbolic,0,0,10,0,0,0
+ms_two_k_two_beta,1,0,0,9,0,0
+ms_two_k_two_beta_linear,0,0,0,0,10,0
+ms_two_k_two_beta_hyperbolic,0,0,2,0,0,8

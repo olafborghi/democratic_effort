@@ -1,0 +1,776 @@
+---
+title: "Democratic Effort Study 2: Follow-Up Regressions"
+format:
+  html:
+    theme: paper
+    code-tools: true
+    code-fold: true
+    toc: true
+    toc-fold: false
+    toc-location: right
+    toc-depth: 3
+    toc-title: "Contents"
+embed-resources: true
+warning: false
+---
+
+```{r}
+#| include: false
+# set error messages to English
+Sys.setenv(LANG = "en")
+
+knitr::opts_chunk$set(
+  fig.align = "center", 
+  fig.retina = 3,
+  fig.width = 6, 
+  fig.height = (6 * 0.618),
+  out.width = "90%", 
+  collapse = FALSE
+)
+
+options(
+  digits = 4,
+  width = 300,
+  dplyr.summarise.inform = FALSE)
+```
+
+```{r}
+#| include: false
+#| warning: true
+#| message: true
+if (!require("groundhog", quietly = TRUE)) {
+  install.packages("groundhog")
+}
+library("groundhog")
+
+# use groundhog to install and load packages
+pkgs <- c("here",         # System path management
+          "datawizard",   # Data preparations (e.g., standardise)
+          "tidyverse",    # ggplot, dplyr, %>%, and friends
+          "modelsummary", # Data and model summaries with tables and plots
+          "tinytable",    # Lightweight package to create tables
+          "afex",         # Interface for (general) linear mixed models
+          "estimatr",     # Fast estimators with robust standard errors
+          "broom.mixed",  # Get tidy model objects
+          "BayesFactor",  # R package for BayesFactors
+          "mgcv",         # Generalized additive models
+          "marginaleffects", # Compute marginal means, slopes, predictions, etc.
+          "ggdist",       # Additional plot elements
+          "patchwork",    # Combine multiple ggplots
+          "showtext"      # Additional fonts for plots etc
+          )
+
+groundhog.library(pkgs, "2026-01-01")
+```
+
+```{r}
+#| include: false
+showtext_auto()
+showtext_opts(dpi = 600)
+
+font_add_google("Public Sans", "Public Sans")
+font_add_google("Public Sans", "Public Sans Light", regular.wt = 300)
+font_add_google("Public Sans", "Public Sans Semibold", regular.wt = 600)
+
+# Custom ggplot theme
+theme_nice <- function() {
+  # General text family and base size
+  theme_minimal(base_family = "Public Sans", base_size = 14) +
+    theme(
+      # Remove minor grid lines for cleaner look
+      panel.grid.minor = element_blank(),
+      # Customize major grid lines color
+      panel.grid.major = element_blank(),
+      # Plot title: bold and custom relative size
+      plot.title = element_text(family = "Public Sans", face = "bold", size = rel(1.1), margin = margin(b = 10)),
+      # Subtitle and caption: lighter weight 
+      plot.subtitle = element_text(family = "Public Sans Light", face = "plain"),
+      plot.caption = element_text(family = "Public Sans Light", face = "plain"),
+      # Axis text: Relative size
+      axis.text = element_text(size = rel(0.9)),
+      # Axis titles: Semibold and custom relative size
+      axis.title = element_text(family = "Public Sans Semibold", size = rel(0.9)),
+      axis.title.x = element_text(hjust = 0.5),
+      axis.title.y = element_text(hjust = 0.5),
+      # Axis lines
+      axis.line = element_line(color = "grey25", linewidth = 0.8),
+      # Facet labels: bold text on grey background
+      strip.text = element_text(
+        family = "Public Sans Semibold", face = "plain",
+        size = rel(1),
+        hjust = 0.5
+      ),
+      strip.background = element_rect(fill = "grey95", color = "grey25", linewidth = 0.8), 
+      # Legend styling: compact and top-positioned
+      legend.title = element_text(family = "Public Sans Semibold", size = rel(0.8)),
+      legend.text = element_text(size = rel(0.8)),
+      legend.position = "top",
+      legend.justification = "center",
+      legend.title.position = "left",
+      legend.margin = margin(l = 0, t = 0)
+    )
+}
+
+theme_set(theme_nice())
+update_geom_defaults("text", list(family = "Public Sans"))
+update_geom_defaults("label", list(family = "Public Sans"))
+```
+
+```{r}
+#| include: false
+data_dir <- here("01_data", "final") 
+table_dir <- here("02_output", "tables", "follow_up") 
+fig_dir <- here("02_output", "figures", "follow_up") 
+model_dir <- here("02_output", "models", "follow_up") 
+
+dir.create(table_dir, recursive = TRUE, showWarnings = TRUE)
+dir.create(fig_dir, recursive = TRUE, showWarnings = TRUE)
+dir.create(model_dir, recursive = TRUE, showWarnings = TRUE)
+```
+
+# Democratic Effort Task Regressions
+
+## Load and prepare data
+
+```{r}
+load(here(data_dir, "demeffort_survey_data.RData")) 
+load(here(data_dir, "demeffort_combined_data.RData"))
+```
+
+```{r}
+participant_vars <- c(
+  "k_rural", "k_urban", "k_ingroup", "k_outgroup", "k_mean",
+  "k_outgroup_ingroup", "beta", "party_importance", "affpol_raw",
+  "affpol_weighted", "valence_democrats", "valence_republicans",
+  "arousal_democrats", "arousal_republicans", "democratic_support", "freefair"
+)
+
+# Wide datasets — standardized
+model_data_wide <- survey_data |>
+  standardize(select = participant_vars)
+
+model_data_wide_dev <- survey_data |>
+  filter(deviation < 0) |>
+  standardize(select = participant_vars)
+
+# Long datasets, drop raw participant vars, merge in standardized ones
+model_data_long <- combined_data |>
+  select(-any_of(participant_vars)) |>
+  inner_join(
+    model_data_wide |> select(PID, all_of(participant_vars)),
+    by = "PID"
+  ) |>
+  mutate(rew = factor(rew, levels = c(4, 12, 20))) |>
+  filter(!is.na(decision)) |>
+  droplevels()
+
+model_data_long_dev <- combined_data |>
+  select(-any_of(participant_vars)) |>
+  inner_join(
+    model_data_wide_dev |> select(PID, all_of(participant_vars)),
+    by = "PID"
+  ) |>
+  mutate(rew = factor(rew, levels = c(4, 12, 20))) |>
+  filter(!is.na(decision)) |>
+  droplevels()
+```
+
+## Generalised linear mixed models
+
+Modelling strategy:
+
+1.  Fix maximum models (Barr et al., 2013)
+
+2.  If models don't converge:
+
+    1.  Remove the correlations between random slope and intercept
+
+    2.  Remove interactions between random slope effects
+
+    3.  Remove random slope effects with a variance close to 0
+
+    4.  Run models only including a random intercept
+
+### Model 1: Decision ~ Reward x Effort x Condition x Benefit
+
+```{r}
+# number of observations (=8933) < number of random effects (=9900)
+# m1.full <- mixed(decision ~ condition * benefit * eff * rew + (1 + benefit * eff * rew | PID),
+#             data = model_data_long_dev,
+#             family = binomial,
+#             method = "LRT",
+#             control = glmerControl(optimizer = "bobyqa", optCtrl=list(maxfun=2e5)),
+#             return = "mixed",
+#             expand_re = T)
+# 
+# m1.full
+# summary(m1.full)
+```
+
+Remove correlations between random terms
+```{r}
+# boundary (singular) fit: see help('isSingular')
+# m1.nocorr <- mixed(decision ~ condition * benefit * eff * rew + (1 + benefit * eff * rew || PID),
+#             data = model_data_long_dev,
+#             family = binomial,
+#             method = "LRT",
+#             control = glmerControl(optimizer = "bobyqa", optCtrl=list(maxfun=2e5)),
+#             return = "merMod",
+#             expand_re = T)
+# 
+# m1.nocorr
+# summary(m1.nocorr)
+```
+
+Remove interactions between random terms
+```{r}
+# boundary (singular) fit: see help('isSingular')
+# m1.noint <- mixed(decision ~ condition * benefit * eff * rew + (1 + benefit + eff + rew || PID),
+#             data = model_data_long_dev,
+#             family = binomial,
+#             method = "LRT",
+#             control = glmerControl(optimizer = "bobyqa", optCtrl=list(maxfun=2e5)),
+#             return = "merMod",
+#             expand_re = T)
+# 
+# m1.noint 
+# summary(m1.noint)
+```
+
+Remove random slopes close to 0 (re-introduce correlation between random slope and random intercept)
+```{r}
+m1_path <- here(model_dir, "m1_glmm_decision.rds")
+
+if (!file.exists(m1_path)) {
+  m1 <- mixed(
+    decision ~ condition * benefit * eff * rew + 
+               (1 + benefit | PID),
+    data = model_data_long_dev,
+    family = binomial,
+    method = "LRT",
+    control = glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 2e5)),
+    return = "mixed",
+    expand_re = TRUE
+  )
+  saveRDS(m1, m1_path)
+} else {
+  m1 <- readRDS(m1_path)
+}
+```
+
+```{r}
+anova_table <- m1$anova_table |>
+  as_tibble(rownames = "Effect") |>
+  select(
+    Effect,
+    df   = `Chi Df`,
+    Chi2 = Chisq,
+    p    = `Pr(>Chisq)`
+  ) |>
+  mutate(
+    Effect = Effect |>
+      str_replace_all("benefit",   "Beneficiary") |>
+      str_replace_all("rew",       "Reward") |>
+      str_replace_all("eff",       "Effort") |>
+      str_replace_all("condition", "Condition") |>
+      str_replace_all(":", " × "),
+    Chi2 = sprintf("%.2f", Chi2),
+    p    = ifelse(p < .001, "< .001", sprintf("%.3f", p))
+  )
+
+anova_table |>
+  tt() |>
+  save_tt(here(table_dir, "anova_table.docx"), overwrite = TRUE)
+
+anova_table |>
+  tt()
+```
+
+```{r}
+contrasts(m1$data$condition)
+contrasts(m1$data$benefit)
+contrasts(m1$data$eff)
+contrasts(m1$data$rew)
+```
+
+```{r}
+m1.mer <- m1$full_model
+
+relabel_terms <- function(x) {
+  x |>
+    str_replace_all("condition1", "Control") |>
+    str_replace_all("benefit1",   "In-group") |>
+    str_replace_all("eff1",       "Effort Level 1") |>
+    str_replace_all("eff2",       "Effort Level 2") |>
+    str_replace_all("rew1",       "4 Credits") |>
+    str_replace_all("rew2",       "12 Credits") |>
+    str_replace_all(":",          " \u00d7 ")
+}
+
+fe <- tidy(m1.mer, effects = "fixed", conf.int = TRUE) |>
+  mutate(
+    term = relabel_terms(term),
+    term = case_when(
+      term == "(Intercept)"                           ~ term,
+      str_detect(term, "\u00d7")                      ~ term,
+      term == "Control"                               ~ "Condition: Control",
+      term == "In-group"                              ~ "Beneficiary: In-group",
+      term %in% c("Effort Level 1", "Effort Level 2") ~ paste0("Effort: ", term),
+      term %in% c("4 Credits", "12 Credits")          ~ paste0("Reward: ", term),
+      TRUE                                            ~ term
+    )
+  ) |>
+  transmute(
+    Term     = term,
+    Estimate = sprintf("%.3f", estimate),
+    SE       = sprintf("%.3f", std.error),
+    z        = sprintf("%.2f", statistic),
+    `95% CI` = paste0("[", sprintf("%.3f", conf.low), ", ", sprintf("%.3f", conf.high), "]"),
+    p        = ifelse(p.value < .001, "< .001", sprintf("%.3f", p.value))
+  )
+
+re <- tidy(m1.mer, effects = "ran_pars") |>
+  mutate(
+    term = term |>
+      str_replace_all("re1\\.benefit1",                  "In-group") |>
+      str_replace_all("sd__\\(Intercept\\)",             "SD (Intercept)") |>
+      str_replace_all("sd__In-group",                    "SD (In-group)") |>
+      str_replace_all("cor__\\(Intercept\\)\\.In-group", "Cor (Intercept, In-group)")
+  ) |>
+  transmute(
+    Term     = term,
+    Estimate = sprintf("%.3f", estimate),
+    SE       = "",
+    z        = "",
+    `95% CI` = "",
+    p        = ""
+  )
+
+n_fe <- nrow(fe)
+
+lmm_table <- bind_rows(fe, re) |>
+  tt() |>
+  group_tt(
+    i = list(
+      "Fixed Effects"                = 1,
+      "Random Effects (Participant)" = n_fe + 1
+    )
+  ) |>
+  style_tt(i = c(1, n_fe + 2), bold = TRUE)
+
+lmm_table
+
+lmm_table |>
+  save_tt(here(table_dir, "lmm_table.docx"), overwrite = TRUE)
+```
+
+### Model-based predictions
+
+```{r}
+# 1. Predicted probabilities by beneficiary (replicates Study 1 finding)
+m1.ben.means <- avg_predictions(m1.mer, 
+                                variables = "benefit",
+                                re.form = NA) |> 
+  as_tibble() |> 
+  select(Beneficiary = benefit, 
+         Estimate = estimate, 
+         SE = std.error,
+         "z" = statistic,
+         "p" = p.value,
+         "95% CI Low" = conf.low,
+         "95% CI High" = conf.high)
+
+# 2. Predicted probabilities by condition (the main treatment effect)
+m1.cond.means <- avg_predictions(m1.mer, 
+                                 variables = "condition",
+                                 re.form = NA) |> 
+  as_tibble() |> 
+  select(Condition = condition, 
+         Estimate = estimate, 
+         SE = std.error,
+         "z" = statistic,
+         "p" = p.value,
+         "95% CI Low" = conf.low,
+         "95% CI High" = conf.high)
+
+# 3. Predicted probabilities by condition × beneficiary (the interaction)
+m1.cond.ben.means <- avg_predictions(m1.mer, 
+                                     variables = c("condition", "benefit"),
+                                     re.form = NA) |> 
+  as_tibble() |> 
+  select(Condition = condition,
+         Beneficiary = benefit, 
+         Estimate = estimate, 
+         SE = std.error,
+         "z" = statistic,
+         "p" = p.value,
+         "95% CI Low" = conf.low,
+         "95% CI High" = conf.high)
+
+m1.means <- bind_rows(
+  m1.ben.means |> mutate(Panel = "Beneficiary"),
+  m1.cond.means |> mutate(Panel = "Condition"),
+  m1.cond.ben.means |> mutate(Panel = "Condition × Beneficiary")
+) |> 
+  mutate(
+    across(where(is.numeric) & !matches("p"), ~ round(.x, 3)),
+    p = ifelse(round(p, 3) == 0, "< .001", as.character(round(p, 3)))
+  )
+
+m1.means |> 
+  tt() |> 
+  save_tt(here(table_dir, "model_means.docx"), overwrite = TRUE)
+
+m1.means |> tt()
+```
+
+```{r}
+# Model-based comparisons
+# 1. Beneficiary pairwise (replicates Study 1)
+m1.ben.comparisons <- avg_comparisons(m1.mer, 
+                                       variables = list(benefit = "pairwise"),
+                                       re.form = NA) |> 
+  as_tibble() |> 
+  mutate(Panel = "Beneficiary")
+
+# 2. Condition pairwise (overall treatment effect)
+m1.cond.comparisons <- avg_comparisons(m1.mer, 
+                                        variables = list(condition = "pairwise"),
+                                        re.form = NA) |> 
+  as_tibble() |> 
+  mutate(Panel = "Condition")
+
+# 3. Condition effect within each beneficiary (the interaction follow-up)
+m1.cond.by.ben <- avg_comparisons(m1.mer, 
+                                   variables = list(condition = "pairwise"),
+                                   by = "benefit",
+                                   re.form = NA) |> 
+  as_tibble() |> 
+  mutate(Panel = "Condition within Beneficiary")
+
+m1.comparisons <- bind_rows(
+  m1.ben.comparisons,
+  m1.cond.comparisons,
+  m1.cond.by.ben
+) |> 
+  select(Panel,
+         Contrast = contrast,
+         Beneficiary = any_of("benefit"),
+         Estimate = estimate, 
+         SE = std.error,
+         "z" = statistic,
+         "p" = p.value,
+         "95% CI Low" = conf.low,
+         "95% CI High" = conf.high) |> 
+  mutate(
+    across(where(is.numeric) & !matches("p"), ~ round(.x, 3)),
+    p = ifelse(round(p, 3) == 0, "< .001", as.character(round(p, 3)))
+  )
+
+m1.comparisons |> 
+  tt() |> 
+  save_tt(here(table_dir, "model_comparisons.docx"), overwrite = TRUE)
+
+m1.comparisons |> tt()
+```
+
+## Comparing Over-, Accurate-, and Underestimators
+
+```{r}
+model_data_wide <- model_data_wide |>
+  mutate(
+    estimation_group = case_when(
+      deviation < 0  ~ "Underestimators",
+      deviation == 0 ~ "Accurate",
+      deviation > 0  ~ "Overestimators"
+    ) |>
+      factor(levels = c("Underestimators", "Accurate", "Overestimators"))
+  )
+
+h2a_interaction <- lm_robust(
+  k_outgroup_ingroup ~ condition * estimation_group,
+  se_type = "HC2",
+  data = model_data_wide
+)
+
+summary(h2a_interaction)
+```
+```{r}
+format_p <- function(p) ifelse(p < .001, "< .001", sprintf("%.3f", p))
+add_stars <- function(p) case_when(p < .001 ~ "***", p < .01 ~ "**", p < .05 ~ "*", TRUE ~ "")
+
+h2a_interaction_table <- tidy(h2a_interaction, conf.int = TRUE) |>
+  mutate(
+    term = term |>
+      str_replace("\\(Intercept\\)", "Intercept (Underestimators, Control)") |>
+      str_replace("^conditionTreatment$", "Treatment vs. Control") |>
+      str_replace("^estimation_groupAccurate$", "Accurate vs. Underestimators") |>
+      str_replace("^estimation_groupOverestimators$", "Overestimators vs. Underestimators") |>
+      str_replace("conditionTreatment:estimation_groupAccurate", 
+                  "Treatment vs. Control × Accurate vs. Underestimators") |>
+      str_replace("conditionTreatment:estimation_groupOverestimators", 
+                  "Treatment vs. Control × Overestimators vs. Underestimators")
+  ) |>
+  transmute(
+    Predictor = term,
+    Estimate = paste0(sprintf("%.3f", estimate), add_stars(p.value)),
+    SE = sprintf("%.3f", std.error),
+    `95% CI Lower` = sprintf("%.3f", conf.low),
+    `95% CI Higher` = sprintf("%.3f", conf.high),
+    p = format_p(p.value)
+  )
+
+h2a_interaction_table |>
+  tt() |>
+  save_tt(here(table_dir, "treatment_effect_interaction.docx"), overwrite = TRUE)
+
+h2a_interaction_table |> tt()
+```
+
+
+```{r}
+# Predicted means at each cell (condition × estimation_group)
+h2a_means <- avg_predictions(
+  h2a_interaction,
+  by = c("estimation_group", "condition")
+) |>
+  as_tibble()
+
+h2a_means |> tt()
+
+# Treatment effect within each estimation group
+h2a_simple_effects <- avg_comparisons(
+  h2a_interaction,
+  variables = "condition",
+  by = "estimation_group"
+) |>
+  as_tibble()
+
+h2a_simple_effects |> tt()
+```
+
+Check for significant backfire effect:
+```{r}
+h2a_nonunder <- lm_robust(
+  k_outgroup_ingroup ~ condition,
+  se_type = "HC2",
+  data = model_data_wide |> filter(deviation >= 0)
+)
+
+summary(h2a_nonunder)
+```
+
+BayesFactors:
+```{r}
+# JZS priors at three standard widths
+bf_medium    <- ttestBF(formula = k_outgroup_ingroup ~ condition, 
+                         data = model_data_wide |> filter(deviation >= 0), rscale = "medium")     # r = sqrt(2)/2 ≈ 0.707
+bf_wide      <- ttestBF(formula = k_outgroup_ingroup ~ condition, 
+                         data = model_data_wide |> filter(deviation >= 0), rscale = "wide")       # r = 1
+bf_ultrawide <- ttestBF(formula = k_outgroup_ingroup ~ condition, 
+                         data = model_data_wide |> filter(deviation >= 0), rscale = "ultrawide")  # r = sqrt(2)
+
+bf_medium
+bf_wide
+bf_ultrawide
+```
+```{r}
+bf_extract <- function(bf_obj, prior_label, target = "interaction") {
+  raw <- extractBF(bf_obj)
+  tibble(
+    prior    = prior_label,
+    BF10     = raw$bf,
+    BF01     = 1 / BF10,
+    log_BF10 = log(BF10),
+    mc_error = raw$error,
+    evidence = case_when(
+      BF01 > 10 ~ paste("Strong evidence for null",   target),
+      BF01 > 3  ~ paste("Moderate evidence for null", target),
+      BF01 > 1  ~ paste("Weak evidence for null",     target),
+      BF10 > 10 ~ paste("Strong evidence for",        target),
+      BF10 > 3  ~ paste("Moderate evidence for",      target),
+      TRUE      ~ paste("Weak evidence for",          target)
+    )
+  )
+}
+
+bf_subgroup_summary <- bind_rows(
+  bf_extract(bf_medium,    "medium",    target = "effect"),
+  bf_extract(bf_wide,      "wide",      target = "effect"),
+  bf_extract(bf_ultrawide, "ultrawide", target = "effect")
+)
+bf_subgroup_summary |> tt()
+```
+
+## Exploratory: Non-Linear Interaction
+
+```{r}
+model_data_wide_dev <- model_data_wide_dev |>
+  mutate(condition_ord = ordered(condition, levels = c("Control", "Treatment")))
+
+f4_gam <- gam(
+  k_outgroup_ingroup ~ condition +
+    s(affpol_weighted, bs = "tp") +
+    s(affpol_weighted, by = condition_ord, bs = "tp"),
+  data   = model_data_wide_dev,
+  method = "REML"
+)
+summary(f4_gam)
+```
+```{r}
+#| fig-width: 4
+#| fig-height: 3
+#| fig-dpi: 600
+pred_grid <- predictions(
+  f4_gam,
+  newdata = datagrid(
+    affpol_weighted = seq(min(model_data_wide_dev$affpol_weighted),
+                          max(model_data_wide_dev$affpol_weighted),
+                          length.out = 200),
+    condition = c("Control", "Treatment")
+  )
+  ) |> 
+  as_tibble()
+
+f4_gam_plot <- ggplot(pred_grid,
+                     aes(x = affpol_weighted, y = estimate,
+                         color = condition, fill = condition)) +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high),
+              alpha = 0.2, color = NA) +
+  geom_line(linewidth = 1.2) +
+  geom_rug(data = model_data_wide_dev,
+           aes(x = affpol_weighted, color = condition),
+           inherit.aes = FALSE, alpha = 0.3, sides = "b") +
+  scale_fill_manual(values = c("#fdae61", "#abd9e9")) +
+  scale_color_manual(values = c("#f46d43", "#74add1")) +
+  labs(
+    x = "Affective Polarization (z-scored)",
+    y = expression(italic(K)[outgroup] - italic(K)[ingroup]),
+    color = NULL, fill = NULL
+  ) +
+  theme(legend.position = "top")
+
+f4_gam_plot
+
+ggsave(
+  here(fig_dir, "GAM_smooths.png"),
+  height = 3,
+  width  = 4,
+  dpi    = 600
+)
+```
+
+## Exploratory: Bayesian Model Comparison
+
+```{r}
+f4_null_med <- lmBF(
+  k_outgroup_ingroup ~ condition + affpol_weighted,
+  data = model_data_wide_dev, rscaleFixed = "medium", rscaleCont = "medium"
+)
+f4_inter_med <- lmBF(
+  k_outgroup_ingroup ~ condition + affpol_weighted + condition:affpol_weighted,
+  data = model_data_wide_dev, rscaleFixed = "medium", rscaleCont = "medium"
+)
+
+f4_null_wid <- lmBF(
+  k_outgroup_ingroup ~ condition + affpol_weighted,
+  data = model_data_wide_dev, rscaleFixed = "wide", rscaleCont = "wide"
+)
+f4_inter_wid <- lmBF(
+  k_outgroup_ingroup ~ condition + affpol_weighted + condition:affpol_weighted,
+  data = model_data_wide_dev, rscaleFixed = "wide", rscaleCont = "wide" 
+)
+
+f4_null_ult <- lmBF(
+  k_outgroup_ingroup ~ condition + affpol_weighted,
+  data = model_data_wide_dev, rscaleFixed = "ultrawide", rscaleCont = "ultrawide"
+)
+f4_inter_ult <- lmBF(
+  k_outgroup_ingroup ~ condition + affpol_weighted + condition:affpol_weighted,
+  data = model_data_wide_dev, rscaleFixed = "ultrawide", rscaleCont = "ultrawide"
+)
+
+# Compute the BFs
+f4_bf_med <- f4_inter_med / f4_null_med
+f4_bf_wid <- f4_inter_wid / f4_null_wid
+f4_bf_ult <- f4_inter_ult / f4_null_ult
+
+f4_bf_med <- recompute(f4_bf_med, iterations = 100000)
+f4_bf_wid <- recompute(f4_bf_wid, iterations = 100000)
+f4_bf_ult <- recompute(f4_bf_ult, iterations = 100000)
+```
+```{r}
+extract_rscale <- function(bf_obj) {
+  prior <- bf_obj@numerator[[1]]@prior$rscale
+  tibble(
+    r_fixed = prior$fixed,
+    r_cont  = prior$continuous
+  )
+}
+
+f4_table <- bind_rows(
+  bind_cols(extract_rscale(f4_inter_med), bf_extract(f4_bf_med, "medium")),
+  bind_cols(extract_rscale(f4_inter_wid), bf_extract(f4_bf_wid, "wide")),
+  bind_cols(extract_rscale(f4_inter_ult), bf_extract(f4_bf_ult, "ultrawide"))
+) |>
+  transmute(
+    Prior             = str_to_title(prior),
+    `r (Categorical)` = sprintf("%.3f", r_fixed),
+    `r (Continuous)`  = sprintf("%.3f", r_cont),
+    `BF₁₀`            = sprintf("%.3f", BF10),
+    `BF₀₁`            = sprintf("%.2f", BF01),
+    `MC Error`        = sprintf("%.2f", mc_error * 100)
+  )
+
+f4_table |> tt()
+
+f4_table |> tt() |> save_tt(here(table_dir, "Bayesian_model_comp.docx"), overwrite = TRUE)
+```
+
+```{r}
+# Sample from the posterior of the medium interaction model
+f4_posterior <- posterior(f4_inter_med, iterations = 10000)
+
+summary(f4_posterior)
+```
+
+### Non-Registered Replications: Partisan Differences
+
+```{r}
+party1 <- lm_robust(k_outgroup_ingroup ~ party + rururb01 + age + gender + education + max_boxes, se_type = "HC2", data = model_data_wide)
+
+summary(party1)
+```
+
+```{r}
+party1.table <- modelsummary(party1, 
+                             shape = term ~ model + statistic,
+                             title = 'In-Group Favouritism ~ Party',
+                             coef_rename = c("partyRepublican" = "Republican - Democrat"),
+                             coef_omit = c(1, 3:14),
+                             estimate  = "{estimate}{stars}",
+                             statistic = c("{std.error}",
+                                           "conf.int",
+                                           "p.value"),
+                             conf_level = .95,
+                             stars = c("*" = 0.05, "**" = 0.01, "***" = 0.001),
+                             fmt = 3,
+                             notes = list('p-values: * < .05, ** < .01, *** < .001'),
+                             gof_omit = ".*")
+
+party1.table
+
+party1.table |> save_tt(here(table_dir, "party1.table.docx"), overwrite = T)
+```
+
+
+
+
+
+
+
+
+
+
+
+

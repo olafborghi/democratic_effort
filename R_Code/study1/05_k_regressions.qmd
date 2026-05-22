@@ -1,0 +1,958 @@
+---
+title: "Democratic Effort k-Regressions"
+format:
+  html:
+    theme: paper
+    code-tools: true
+    code-fold: true
+    toc: true
+    toc-fold: false
+    toc-location: right
+    toc-depth: 3
+    toc-title: "Contents"
+embed-resources: true
+warning: false
+---
+
+```{r}
+#| include: false
+# set error messages to English
+Sys.setenv(LANG = "en")
+
+knitr::opts_chunk$set(
+  fig.align = "center", 
+  fig.retina = 3,
+  fig.width = 6, 
+  fig.height = (6 * 0.618),
+  out.width = "90%", 
+  collapse = FALSE
+)
+
+options(
+  digits = 4,
+  width = 300,
+  dplyr.summarise.inform = FALSE)
+```
+
+```{r}
+#| include: false
+#| warning: true
+#| message: true
+if (!require("groundhog", quietly = TRUE)) {
+  install.packages("groundhog")
+}
+library("groundhog")
+
+# use groundhog to install and load packages
+pkgs <- c("here",         # System path management
+          "datawizard",   # Data preparations (e.g., standardise)
+          "tidyverse",    # ggplot, dplyr, %>%, and friends
+          "estimatr",     # Fast estimators with robust standard errors
+          "effectsize",   # Effect sizes: Cohen's D and friends
+          "correlation",  # For Bayesian correlations
+          "modelsummary", # Data and model summaries with tables and plots
+          "tinytable",    # Lightweight package to create tables
+          "marginaleffects",      # Compute marginal means, slopes, predictions, etc.
+          "broom",        # Tidy up models
+          "ggdist",       # Additional plot elements
+          "GGally",       # ggpairs and other ggplot2 friends
+          "patchwork",    # Combine multiple ggplots
+          "showtext"      # Additional fonts for plots etc
+          )
+
+groundhog.library(pkgs, "2026-01-01")
+```
+
+```{r}
+#| include: false
+showtext_auto()
+showtext_opts(dpi = 600) # change to 96 on Windows
+
+font_add_google("Public Sans", "Public Sans")
+font_add_google("Public Sans", "Public Sans Light", regular.wt = 300)
+font_add_google("Public Sans", "Public Sans Semibold", regular.wt = 600)
+
+# Custom ggplot theme
+theme_nice <- function(base_size = 14) {
+  # General text family and base size
+  theme_minimal(base_family = "Public Sans", base_size = base_size) +
+    theme(
+      # Remove minor grid lines for cleaner look
+      panel.grid.minor = element_blank(),
+      # Customize major grid lines color
+      panel.grid.major = element_blank(),
+      # Plot title: bold and custom relative size
+      plot.title = element_text(family = "Public Sans", face = "bold", size = rel(1.1), margin = margin(b = 10)),
+      # Subtitle and caption: lighter weight 
+      plot.subtitle = element_text(family = "Public Sans Light", face = "plain"),
+      plot.caption = element_text(family = "Public Sans Light", face = "plain"),
+      # Axis text: Relative size
+      axis.text = element_text(size = rel(0.9)),
+      # Axis titles: Semibold and custom relative size
+      axis.title = element_text(family = "Public Sans Semibold", size = rel(0.9)),
+      axis.title.x = element_text(hjust = 0.5),
+      axis.title.y = element_text(hjust = 0.5),
+      # Axis lines
+      axis.line = element_line(color = "grey25", linewidth = 0.8),
+      # Facet labels: bold text on grey background
+      strip.text = element_text(
+        family = "Public Sans Semibold", face = "plain",
+        size = rel(1),
+        hjust = 0.5
+      ),
+      strip.background = element_rect(fill = "grey95", color = "grey25", linewidth = 0.8), 
+      # Legend styling: compact and top-positioned
+      legend.title = element_text(family = "Public Sans Semibold", size = rel(0.8)),
+      legend.text = element_text(size = rel(0.8)),
+      legend.position = "top",
+      legend.justification = "center",
+      legend.title.position = "left",
+      legend.margin = margin(l = 0, t = 0)
+    )
+}
+
+theme_set(theme_nice())
+update_geom_defaults("text", list(family = "Public Sans"))
+update_geom_defaults("label", list(family = "Public Sans"))
+
+agent_limits <- c("VOTEALL", "VOTERURAL", "VOTEURBAN")
+agent_colors <- c("VOTEALL" = "grey10", "VOTERURAL" = "firebrick3", "VOTEURBAN" = "slateblue4")  
+agent_fills <- c("VOTEALL" = "grey10", "VOTERURAL" = "firebrick3", "VOTEURBAN" = "slateblue4")   
+agent_lines <- c("VOTEALL" = "solid", "VOTERURAL" = "dashed", "VOTEURBAN" = "dashed")
+
+benefit_limits <- c("In-Group", "Everyone", "Out-Group")
+benefit_colors <- c("Everyone" = "grey20", "In-Group" = "#009988", "Out-Group" = "#EE7733") 
+benefit_fills <- c("Everyone" = "grey20", "In-Group" = "#009988", "Out-Group" = "#EE7733")
+benefit_lines <- c("Everyone" = "solid", "In-Group" = "dashed", "Out-Group" = "dashed")
+```
+
+```{r}
+#| include: false
+data_dir <- here("01_data", "final") 
+table_dir <- here("02_output", "tables", "k_regressions") 
+fig_dir <- here("02_output", "figures", "k_regressions") 
+
+dir.create(table_dir, recursive = TRUE, showWarnings = TRUE)
+dir.create(fig_dir, recursive = TRUE, showWarnings = TRUE)
+```
+
+# Democratic Effort Task Regressions 
+
+## Load and prepare data
+
+```{r}
+load(here(data_dir, "demeffort_survey_data.RData")) 
+load(here(data_dir, "demeffort_combined_data.RData"))
+```
+
+```{r}
+model_data <- survey_data |>
+  standardize(
+    select = c(k_all, k_rural, k_urban, k_ingroup, k_outgroup, 
+               k_mean, k_outgroup_ingroup, k_all_ingroup, k_outgroup_all,
+               beta, max_boxed)
+  ) |> 
+  mutate(gender = fct_collapse(gender,
+    "Woman" = c("Woman", "Other") # only one other case, otherwise models don't converge
+  )) |> 
+  droplevels() |> 
+  mutate(donation_decision = factor(donation_decision, levels = c("Keep", "Donate")))
+```
+
+## Task Validation
+
+### Preliminary
+
+```{r}
+t.test(survey_data$k_outgroup, survey_data$k_ingroup, paired = TRUE) 
+cohens_d(survey_data$k_outgroup, survey_data$k_ingroup, paired = TRUE)
+```
+
+### H1d
+
+H1d. Participants who show greater motivation / less effort discounting for non-partisan democratic engagement will also be more likely to donate the money to a non-partisan cause after the task rather than accepting it as bonus payment for themselves. 
+To investigate H1d, we will run a linear regression model using the motivation / effort discounting parameter for all areas (k_all) as the outcome, and the decision after the task to donate the money (1) or to keep the money (0) as predictor variable: k_all ~ Donation 
+
+```{r}
+h1d <- lm_robust(k_all ~ donation_decision, se_type = "HC2", data = model_data)
+summary(h1d)
+```
+
+```{r}
+h1d.table <- modelsummary(h1d, 
+                          shape = term ~ model + statistic,
+                          title = 'Table H1d: k_all ~ Donation Decision',
+                          coef_rename = c("donation_decisionDonate" = "Donate - Keep"),
+                          coef_omit = 1,
+                          estimate  = "{estimate}{stars}",
+                          statistic = c("{std.error}",
+                                        "conf.int",
+                                        "p.value"),
+                          conf_level = .95,
+                          stars = c("*" = 0.05, "**" = 0.01, "***" = 0.001),
+                          fmt = 3,
+                          notes = list('p-values: * < .05, ** < .01, *** < .001'),
+                          gof_omit = ".*")
+
+h1d.table
+
+h1d.table |> save_tt(here(table_dir, "h1d.table.docx"), overwrite = T)
+```
+
+## Partisan Differences
+
+### H2a
+
+H2a. Republicans will show greater motivation / less effort discounting for rural areas than Democrats. 
+To investigate H2a, we will run a linear regression model using  the motivation / effort discounting parameter for rural areas (k_rural) as outcome variable and partisanship (Democrat / Republican) as predictor variable: k_rural ~ Partisanship + Controls
+
+```{r}
+h2a <- lm_robust(k_rural ~ party + rururb01 + age + gender + education + max_boxes, se_type = "HC2", data = model_data)
+h2a_nocon <- lm_robust(k_rural ~ party, se_type = "HC2", data = model_data)
+
+summary(h2a)
+```
+
+```{r}
+h2a.models <- list(
+  "Pre-Registered" = h2a, 
+  "Without Controls" = h2a_nocon)
+
+h2a.table <- modelsummary(h2a.models, 
+                          shape = term ~ model + statistic,
+                          title = 'Table H2a: k_rural ~ Party',
+                          coef_rename = c("partyRepublican" = "Republican - Democrat"),
+                          coef_omit = c(1, 3:12),
+                          estimate  = "{estimate}{stars}",
+                          statistic = c("{std.error}",
+                                        "conf.int",
+                                        "p.value"),
+                          conf_level = .95,
+                          stars = c("*" = 0.05, "**" = 0.01, "***" = 0.001),
+                          fmt = 3,
+                          notes = list('p-values: * < .05, ** < .01, *** < .001'),
+                          gof_omit = ".*")
+
+h2a.table
+
+h2a.table |> save_tt(here(table_dir, "h2a.table.docx"), overwrite = T)
+```
+
+### H2b
+
+H2b. Democrats will show greater motivation / less effort discounting for urban areas than Republicans. 
+To investigate H2b, we will run a linear regression model using  the motivation / effort discounting parameter for urban areas (k_urban) as outcome variable and partisanship (Democrat / Republican) as predictor variable: k_urban ~ Partisanship + Controls
+
+```{r}
+h2b <- lm_robust(k_urban ~ party + rururb01 + age + gender + education + max_boxes, se_type = "HC2", data = model_data)
+h2b_nocon <- lm_robust(k_urban ~ party, se_type = "HC2", data = model_data)
+
+summary(h2b)
+```
+
+```{r}
+h2b.models <- list(
+  "Pre-Registered" = h2b, 
+  "Without Controls" = h2b_nocon)
+
+h2b.table <- modelsummary(h2b.models, 
+                          shape = term ~ model + statistic,
+                          title = 'Table H2b: k_urban ~ Party',
+                          coef_rename = c("partyRepublican" = "Republican - Democrat"),
+                          coef_omit = c(1, 3:12),
+                          estimate  = "{estimate}{stars}",
+                          statistic = c("{std.error}",
+                                        "conf.int",
+                                        "p.value"),
+                          conf_level = .95,
+                          stars = c("*" = 0.05, "**" = 0.01, "***" = 0.001),
+                          fmt = 3,
+                          notes = list('p-values: * < .05, ** < .01, *** < .001'),
+                          gof_omit = ".*")
+
+h2b.table
+
+h2b.table |> save_tt(here(table_dir, "h2b.table.docx"), overwrite = T)
+```
+
+### H2c
+
+H2c: Democrats and Republicans differ in their motivation / effort discounting for non-partisan democratic engagement.
+To investigate H2c, we will run a linear regression model using the motivation / effort discounting parameter for all areas (k_all) as outcome variable and partisanship (Democrat / Republican) as predictor variable: k_all ~ Partisanship + Controls
+
+```{r}
+h2c <- lm_robust(k_all ~ party + rururb01 + age + gender + education + max_boxes, data = model_data)
+h2c_nocon <- lm_robust(k_all ~ party, data = model_data)
+
+summary(h2c)
+```
+
+```{r}
+h2c.models <- list(
+  "Pre-Registered" = h2c, 
+  "Without Controls" = h2c_nocon)
+
+h2c.table <- modelsummary(h2c.models, 
+                          shape = term ~ model + statistic,
+                          title = 'Table H2c: k_all ~ Party',
+                          coef_rename = c("partyRepublican" = "Republican - Democrat"),
+                          coef_omit = c(1, 3:12),
+                          estimate  = "{estimate}{stars}",
+                          statistic = c("{std.error}",
+                                        "conf.int",
+                                        "p.value"),
+                          conf_level = .95,
+                          stars = c("*" = 0.05, "**" = 0.01, "***" = 0.001),
+                          fmt = 3,
+                          notes = list('p-values: * < .05, ** < .01, *** < .001'),
+                          gof_omit = ".*")
+
+h2c.table
+
+h2c.table |> save_tt(here(table_dir, "h2c.table.docx"), overwrite = T)
+```
+
+### H2d
+
+H2d: Democrats and Republicans differ in their in-group favouritism (i.e., the difference between motivation / effort discounting in the in-group - the out-group condition).
+To investigate H2d, we will run a linear regression model using the difference between the motivation / effort discounting parameters for the in-group and out-group (k_outgroup - k_ingroup) as the outcome and partisanship (Democrat / Republican) as predictor variable: (k_outgroup - k_ingroup) ~ Partisanship + Controls
+
+```{r}
+h2d <- lm_robust(k_outgroup_ingroup ~ party + rururb01 + age + gender + education + max_boxes, se_type = "HC2", data = model_data)
+h2d_nocon <- lm_robust(k_outgroup_ingroup ~ party, se_type = "HC2", data = model_data)
+
+summary(h2d)
+```
+
+```{r}
+h2d.models <- list(
+  "Pre-Registered" = h2d, 
+  "Without Controls" = h2d_nocon)
+
+h2d.table <- modelsummary(h2d.models, 
+                          shape = term ~ model + statistic,
+                          title = 'Table H2d: In-Group Favouritism ~ Party',
+                          coef_rename = c("partyRepublican" = "Republican - Democrat"),
+                          coef_omit = c(1, 3:12),
+                          estimate  = "{estimate}{stars}",
+                          statistic = c("{std.error}",
+                                        "conf.int",
+                                        "p.value"),
+                          conf_level = .95,
+                          stars = c("*" = 0.05, "**" = 0.01, "***" = 0.001),
+                          fmt = 3,
+                          notes = list('p-values: * < .05, ** < .01, *** < .001'),
+                          gof_omit = ".*")
+
+h2d.table
+
+h2d.table |> save_tt(here(table_dir, "h2d.table.docx"), overwrite = T)
+```
+
+## Political Correlates
+
+### H3a
+
+H3a. Support for democracy will be positively correlated with greater motivation / less effort discounting for non-partisan democratic engagement.
+To investigate H3a, we will run a linear regression model using the motivation / effort discounting parameter for all areas (k_all) as the outcome and support for democracy as predictor variable: k_all ~ Democratic Support + Controls
+
+```{r}
+h3a <- lm_robust(k_all ~ democratic_support + rururb01 + age + gender + education + max_boxes, se_type = "HC2", data = model_data)
+h3a_nocon <- lm_robust(k_all ~ democratic_support, se_type = "HC2", data = model_data)
+
+summary(h3a)
+```
+
+```{r}
+h3a.models <- list(
+  "Pre-Registered" = h3a, 
+  "Without Controls" = h3a_nocon)
+
+h3a.table <- modelsummary(h3a.models, 
+                          shape = term ~ model + statistic,
+                          title = 'Table H3a: k_all ~ democratic_support',
+                          coef_rename = c("democratic_support" = "Support for Democracy"),
+                          coef_omit = c(1, 3:12),
+                          estimate  = "{estimate}{stars}",
+                          statistic = c("{std.error}",
+                                        "conf.int",
+                                        "p.value"),
+                          conf_level = .95,
+                          stars = c("*" = 0.05, "**" = 0.01, "***" = 0.001),
+                          fmt = 3,
+                          notes = list('p-values: * < .05, ** < .01, *** < .001'),
+                          gof_omit = ".*")
+
+h3a.table
+
+h3a.table |> save_tt(here(table_dir, "h3a.table.docx"), overwrite = T)
+```
+
+#### F3a 
+
+Democratic Support, Item-level
+
+```{r}
+f3a <- lm_robust(k_all ~ dem_01_r + dem_02_r + dem_03_r + dem_04 + dem_05_r + dem_06_r + dem_07_r + 
+            rururb01 + age + gender + education + max_boxes, se_type = "HC2", data = model_data)
+f3a_nocon <- lm_robust(k_all ~ dem_01_r + dem_02_r + dem_03_r + dem_04 + dem_05_r + dem_06_r + dem_07_r, 
+                se_type = "HC2", data = model_data)
+
+summary(f3a)
+```
+
+```{r}
+f3a.models <- list(
+  "Pre-Registered" = f3a,
+  "Without Controls" = f3a_nocon)
+
+f3a.table <- modelsummary(f3a.models, 
+                          shape = term ~ model + statistic,
+                          title = 'Table f3a: k_all ~ democratic_support items',
+                          coef_rename = c(
+                            "dem_01_r" = "Freedom of Expression",
+                            "dem_02_r" = "Freedom of Association", 
+                            "dem_03_r" = "Universal Suffrage",
+                            "dem_04" = "Free and Fair Elections",
+                            "dem_05_r" = "Judicial Constraints on Executive",
+                            "dem_06_r" = "Legislative Constraints on Executive",
+                            "dem_07_r" = "Equality Before the Law"
+                          ),
+                          coef_omit = c(1, 9:18),
+                          estimate  = "{estimate}{stars}",
+                          statistic = c("{std.error}",
+                                        "conf.int",
+                                        "p.value"),
+                          conf_level = .95,
+                          stars = c("*" = 0.05, "**" = 0.01, "***" = 0.001),
+                          fmt = 3,
+                          notes = list('p-values: * < .05, ** < .01, *** < .001'),
+                          gof_omit = ".*")
+
+f3a.table
+
+f3a.table |> save_tt(here(table_dir, "f3a.table.docx"), overwrite = T)
+```
+
+### H3b
+
+H3b. Voting importance will be positively correlated with greater motivation / less effort discounting for non-partisan democratic engagement.
+To investigate H3b, we will run a linear regression model using the motivation / effort discounting parameter for all areas (k_all) as the outcome and voting importance as predictor variable: k_all ~ Voting Importance + Controls
+
+```{r}
+h3b <- lm_robust(k_all ~ vote_importance + rururb01 + age + gender + education + max_boxes, se_type = "HC2", data = model_data)
+h3b_nocon <- lm_robust(k_all ~ vote_importance, se_type = "HC2", data = model_data)
+
+summary(h3b)
+```
+
+```{r}
+h3b.models <- list(
+  "Pre-Registered" = h3b, 
+  "Without Controls" = h3b_nocon)
+
+h3b.table <- modelsummary(h3b.models, 
+                          shape = term ~ model + statistic,
+                          title = 'Table H3b: k_all ~ vote_importance',
+                          coef_rename = c("vote_importance" = "Voting Importance"),
+                          coef_omit = c(1, 3:12),
+                          estimate  = "{estimate}{stars}",
+                          statistic = c("{std.error}",
+                                        "conf.int",
+                                        "p.value"),
+                          conf_level = .95,
+                          stars = c("*" = 0.05, "**" = 0.01, "***" = 0.001),
+                          fmt = 3,
+                          notes = list('p-values: * < .05, ** < .01, *** < .001'),
+                          gof_omit = ".*")
+
+h3b.table
+
+h3b.table |> save_tt(here(table_dir, "h3b.table.docx"), overwrite = T)
+```
+
+### H3c
+
+H3c. Partisan intensity will be positively correlated with greater motivation / less effort discounting for the political in-group over the political out-group. 
+To investigate H3c, we will run a linear regression model using the difference between the motivation / effort discounting parameters for the in-group and out-group (k_outgroup - k_ingroup) as the outcome and partisan intensity as predictor variable: (k_outgroup - k_ingroup) ~ Partisan Intensity + Controls
+
+```{r}
+h3c <- lm_robust(k_outgroup_ingroup ~ party_identity_strength + rururb01 + age + gender + education + max_boxes, 
+                 se_type = "HC2", data = model_data)
+h3c_nocon <- lm_robust(k_outgroup_ingroup ~ party_identity_strength, se_type = "HC2", data = model_data)
+
+summary(h3c)
+```
+
+```{r}
+h3c.models <- list(
+  "Pre-Registered" = h3c, 
+  "Without Controls" = h3c_nocon)
+
+h3c.table <- modelsummary(h3c.models, 
+                          shape = term ~ model + statistic,
+                          title = 'Table H3c: In-Group Favoritism ~ party_identity_strength',
+                          coef_rename = c("party_identity_strength" = "Partisan Identity Strength"),
+                          coef_omit = c(1, 3:12),
+                          estimate  = "{estimate}{stars}",
+                          statistic = c("{std.error}",
+                                        "conf.int",
+                                        "p.value"),
+                          conf_level = .95,
+                          stars = c("*" = 0.05, "**" = 0.01, "***" = 0.001),
+                          fmt = 3,
+                          notes = list('p-values: * < .05, ** < .01, *** < .001'),
+                          gof_omit = ".*")
+
+h3c.table
+
+h3c.table |> save_tt(here(table_dir, "h3c.table.docx"), overwrite = T)
+```
+
+### H3d
+
+H3d. Affective polarisation will be positively correlated with greater motivation / less effort discounting for the political in-group over the political out-group.
+To investigate H3c, we will run a linear regression model using the difference between the motivation / effort discounting parameters for the in-group and out-group (k_outgroup - k_ingroup) as the outcome and affective polarisation as the predictor variable: (k_outgroup - k_ingroup) ~ Affective Polarisation + Controls
+
+```{r}
+h3d <- lm_robust(k_outgroup_ingroup ~ affpol_weighted + rururb01 + age + gender + education + max_boxes, 
+                 se_type = "HC2", data = model_data)
+h3d_nocon <- lm_robust(k_outgroup_ingroup ~ affpol_weighted, 
+                       se_type = "HC2", data = model_data)
+
+summary(h3d)
+```
+
+```{r}
+h3d.models <- list(
+  "Pre-Registered" = h3d, 
+  "Without Controls" = h3d_nocon)
+
+h3d.table <- modelsummary(h3d.models, 
+                          shape = term ~ model + statistic,
+                          title = 'Table H3d: In-Group Favoritism ~ affpol_weighted',
+                          coef_rename = c("affpol_weighted" = "Affective Polarization"),
+                          coef_omit = c(1, 3:12),
+                          estimate  = "{estimate}{stars}",
+                          statistic = c("{std.error}",
+                                        "conf.int",
+                                        "p.value"),
+                          conf_level = .95,
+                          stars = c("*" = 0.05, "**" = 0.01, "***" = 0.001),
+                          fmt = 3,
+                          notes = list('p-values: * < .05, ** < .01, *** < .001'),
+                          gof_omit = ".*")
+
+h3d.table
+
+h3d.table |> save_tt(here(table_dir, "h3d.table.docx"), overwrite = T)
+```
+
+### Table
+
+```{r}
+format_p <- function(p) ifelse(p < .001, "< .001", sprintf("%.3f", p))
+add_stars <- function(p) case_when(p < .001 ~ "***", p < .01 ~ "**", p < .05 ~ "*", TRUE ~ "")
+
+extract_focal <- function(model, focal_term, panel) {
+  tidy(model, conf.int = TRUE) |>
+    filter(term == focal_term) |>
+    transmute(
+      panel,
+      Predictor = focal_term,
+      Estimate  = paste0(sprintf("%.3f", estimate), add_stars(p.value)),
+      SE        = sprintf("%.3f", std.error),
+      `95% CI Lower`    = sprintf("%.3f", conf.low),
+      `95% CI Higher`   = sprintf("%.3f", conf.high),
+      p         = format_p(p.value)
+    )
+}
+
+label_map <- c(
+  "democratic_support"      = "Support for Democracy",
+  "vote_importance"         = "Voting Importance",
+  "party_identity_strength" = "Partisan Identity Strength"
+)
+
+s5_rows <- bind_rows(
+  extract_focal(h3a,       "democratic_support",      "Pre-Registered"),
+  extract_focal(h3a_nocon, "democratic_support",      "Without Controls"),
+  extract_focal(h3b,       "vote_importance",         "Pre-Registered"),
+  extract_focal(h3b_nocon, "vote_importance",         "Without Controls"),
+  extract_focal(h3c,       "party_identity_strength", "Pre-Registered"),
+  extract_focal(h3c_nocon, "party_identity_strength", "Without Controls")
+) |>
+  mutate(
+    Predictor = recode(Predictor, !!!label_map),
+    Model     = panel
+  ) |>
+  select(Model, Estimate, SE, `95% CI Lower`, `95% CI Higher`, p)
+
+s5_table <- s5_rows |>
+  tt(notes = list(
+    "Models control for locality of residence, age, gender, education, and general effort capacity. All continuous variables z-scored.",
+    "p-values: * < .05, ** < .01, *** < .001"
+  )) |>
+  group_tt(
+    i = list(
+      "Support for Democracy ~ K All"               = 1,
+      "Voting Importance ~ K All Areas"                   = 3,
+      "Partisan Identity Strength ~ In-Group Favoritism"  = 5
+    )
+  ) |>
+  style_tt(i = c(1, 4, 7), bold = TRUE)
+
+s5_table
+
+s5_table |> save_tt(here(table_dir, "s5_political_correlates.docx"), overwrite = TRUE)
+```
+
+```{r}
+#| message: false
+#| fig-width: 12
+#| fig-height: 10
+#| fig-dpi: 600
+scatter_function <- function(data, mapping, ...) {
+  ggplot(data = data, mapping = mapping) +
+    geom_point(alpha = 0.2, size = 1, color = "#fd8d3c") +
+    geom_smooth(method    = "lm",
+                se        = TRUE,
+                linewidth = 1.2,
+                alpha     = 0.15,
+                color     = "black",
+                fill      = "black",
+                na.rm     = TRUE)
+}
+
+political_corr_plot <- survey_data |>
+  select(
+    "K Out\u2212In" = k_outgroup_ingroup,
+    "K All"         = k_all,
+    "K In"          = k_ingroup,
+    "K Out"         = k_outgroup,
+    "DemSupp"       = democratic_support,
+    "VoteImp"       = vote_importance,
+    "PartStr"       = party_identity_strength
+  ) |>
+  ggpairs(
+    lower    = list(continuous = scatter_function),
+    upper    = list(continuous = wrap("cor", stars = TRUE, size = 5)),
+    diag     = list(continuous = wrap("densityDiag", alpha = 0.5,
+                                      fill = "#fd8d3c", color = "#f16913")),
+    progress = FALSE
+  ) +
+  theme_nice() +
+  theme(
+    axis.text  = element_text(size = 10),
+    strip.text = element_text(size = 11)
+  )
+
+political_corr_plot
+
+ggsave(
+  here(fig_dir, "political_correlogram.png"),
+  height = 10,
+  width  = 12,
+  dpi    = 600
+)
+```
+
+
+## General and Mental-Health
+
+### H4a
+
+H4a. Greater general stress will be negatively correlated with greater motivation / less effort discounting for non-partisan, in-group and out-group democratic engagement. 
+To investigate H4a, we will run a linear regression model predicting the average motivation / effort discounting parameter across conditions (k_mean = mean(k_all, k_ingroup, k_outgroup)) as the outcome variable and general stress as the predictor variable: k_mean ~ General Stress + Controls
+
+```{r}
+h4a <- lm_robust(k_mean ~ stress_general + rururb01 + age + gender + education + max_boxes, se_type = "HC2", data = model_data)
+h4a_nocon <- lm_robust(k_mean ~ stress_general, se_type = "HC2", data = model_data)
+
+summary(h4a)
+```
+
+```{r}
+h4a.models <- list(
+  "Pre-Registered" = h4a, 
+  "Without Controls" = h4a_nocon)
+
+h4a.table <- modelsummary(h4a.models, 
+                          shape = term ~ model + statistic,
+                          title = 'Table H4a: k_mean ~ stress_general',
+                          coef_rename = c("stress_general" = "General Stress"),
+                          coef_omit = c(1, 3:12),
+                          estimate  = "{estimate}{stars}",
+                          statistic = c("{std.error}",
+                                        "conf.int",
+                                        "p.value"),
+                          conf_level = .95,
+                          stars = c("*" = 0.05, "**" = 0.01, "***" = 0.001),
+                          fmt = 3,
+                          notes = list('p-values: * < .05, ** < .01, *** < .001'),
+                          gof_omit = ".*")
+
+h4a.table
+
+h4a.table |> save_tt(here(table_dir, "h4a.table.docx"), overwrite = T)
+```
+
+### H4b
+
+H4b. Greater depression scores will be negatively correlated with greater motivation / less effort discounting for non-partisan, in-group and out-group democratic engagement. 
+To investigate H4b, we will run a linear regression model predicting the average motivation / effort discounting parameter across conditions (k_mean = mean(k_all, k_ingroup, k_outgroup)) as the outcome variable and depression score as the predictor variable: k_mean ~ Depression Score + Controls
+
+```{r}
+h4b <- lm_robust(k_mean ~ depression + rururb01 + age + gender + education + max_boxes, 
+          se_type = "HC2", data = model_data)
+h4b_nocon <- lm_robust(k_mean ~ depression, se_type = "HC2", data = model_data)
+
+summary(h4b)
+```
+
+```{r}
+h4b.models <- list(
+  "Pre-Registered" = h4b, 
+  "Without Controls" = h4b_nocon)
+
+h4b.table <- modelsummary(h4b.models, 
+                          shape = term ~ model + statistic,
+                          title = 'Table H4b: k_mean ~ depression',
+                          coef_rename = c("depression" = "Depression Score"),
+                          coef_omit = c(1, 3:12),
+                          estimate  = "{estimate}{stars}",
+                          statistic = c("{std.error}",
+                                        "conf.int",
+                                        "p.value"),
+                          conf_level = .95,
+                          stars = c("*" = 0.05, "**" = 0.01, "***" = 0.001),
+                          fmt = 3,
+                          notes = list('p-values: * < .05, ** < .01, *** < .001'),
+                          gof_omit = ".*")
+
+h4b.table
+
+h4b.table |> save_tt(here(table_dir, "h4b.table.docx"), overwrite = T)
+```
+
+### H4c
+
+H4c. Poor general health will be negatively correlated with greater motivation / less effort discounting for non-partisan, in-group and out-group democratic engagement. 
+To investigate H4c, we will run a linear regression model predicting the average motivation / effort discounting parameter across conditions (k_mean = mean(k_all, k_ingroup, k_outgroup)) as the outcome variable and general health as the predictor variable: k_mean ~ General Health + Controls
+
+```{r}
+h4c <- lm_robust(k_mean ~ health_general + rururb01 + age + gender + education + max_boxes, se_type = "HC2", data = model_data)
+h4c_nocon <- lm_robust(k_mean ~ health_general, se_type = "HC2", data = model_data)
+
+summary(h4c)
+```
+
+```{r}
+h4c.models <- list(
+  "Pre-Registered" = h4c, 
+  "Without Controls" = h4c_nocon)
+
+h4c.table <- modelsummary(h4c.models, 
+                          shape = term ~ model + statistic,
+                          title = 'Table H4c: k_mean ~ health_general',
+                          coef_rename = c("health_general" = "General Health"),
+                          coef_omit = c(1, 3:12),
+                          estimate  = "{estimate}{stars}",
+                          statistic = c("{std.error}",
+                                        "conf.int",
+                                        "p.value"),
+                          conf_level = .95,
+                          stars = c("*" = 0.05, "**" = 0.01, "***" = 0.001),
+                          fmt = 3,
+                          notes = list('p-values: * < .05, ** < .01, *** < .001'),
+                          gof_omit = ".*")
+
+h4c.table
+
+h4c.table |> save_tt(here(table_dir, "h4c.table.docx"), overwrite = T)
+```
+
+### H4d
+
+H4d. There are two competing hypotheses regarding the relationship between costs to health due to politics and motivation / effort discounting for democratic engagement:
+- H4d1. Greater costs to health due to politics will be positively associated with motivation / less effort discounting, reflecting engagement-driven effects.
+- H4d2. Greater costs to health due to politics will be negatively associated with motivation / less effort discounting, reflecting limitations imposed by poor health.
+To investigate H4d, we will run a linear regression model predicting the average motivation / effort discounting parameter across conditions (k_mean = mean(k_all, k_ingroup, k_outgroup)) as the outcome variable and health due to politics as the predictor variable: k_mean ~ Health and politics + Controls
+
+```{r}
+h4d <- lm_robust(k_mean ~ health_politics + rururb01 + age + gender + education + max_boxes, se_type = "HC2", data = model_data)
+h4d_nocon <- lm_robust(k_mean ~ health_politics, se_type = "HC2", data = model_data)
+
+summary(h4d)
+```
+
+```{r}
+h4d.models <- list(
+  "Pre-Registered" = h4d, 
+  "Without Controls" = h4d_nocon)
+
+h4d.table <- modelsummary(h4d.models, 
+                          shape = term ~ model + statistic,
+                          title = 'Table H4d: k_mean ~ health_politics',
+                          coef_rename = c("health_politics" = "Health & Politics"),
+                          coef_omit = c(1, 3:12),
+                          estimate  = "{estimate}{stars}",
+                          statistic = c("{std.error}",
+                                        "conf.int",
+                                        "p.value"),
+                          conf_level = .95,
+                          stars = c("*" = 0.05, "**" = 0.01, "***" = 0.001),
+                          fmt = 3,
+                          notes = list('p-values: * < .05, ** < .01, *** < .001'),
+                          gof_omit = ".*")
+
+h4d.table
+
+h4d.table |> save_tt(here(table_dir, "h4d.table.docx"), overwrite = T)
+```
+
+### Table
+
+```{r}
+health_label_map <- c(
+  "stress_general"  = "General Stress",
+  "depression"      = "Depression Score",
+  "health_general"  = "General Health",
+  "health_politics" = "Health Costs Due to Politics"
+)
+
+s6_rows <- bind_rows(
+  extract_focal(h4a,       "stress_general",  "Pre-Registered"),
+  extract_focal(h4a_nocon, "stress_general",  "Without Controls"),
+  extract_focal(h4b,       "depression",      "Pre-Registered"),
+  extract_focal(h4b_nocon, "depression",      "Without Controls"),
+  extract_focal(h4c,       "health_general",  "Pre-Registered"),
+  extract_focal(h4c_nocon, "health_general",  "Without Controls"),
+  extract_focal(h4d,       "health_politics", "Pre-Registered"),
+  extract_focal(h4d_nocon, "health_politics", "Without Controls")
+) |>
+  mutate(
+    Predictor = recode(Predictor, !!!health_label_map),
+    Model     = panel
+  ) |>
+  select(Model, Estimate, SE, `95% CI Lower`, `95% CI Higher`, p)
+
+s6_table <- s6_rows |>
+  tt(notes = list(
+    "Models control for locality of residence, age, gender, education, and general effort capacity. All continuous variables z-scored.",
+    "p-values: * < .05, ** < .01, *** < .001"
+  )) |>
+  group_tt(
+    i = list(
+      "General Stress ~ K Mean"               = 1,
+      "Depression Score ~ K Mean"             = 3,
+      "General Health ~ K Mean"               = 5,
+      "Health Costs Due to Politics ~ K Mean" = 7
+    )
+  ) |>
+  style_tt(i = c(1, 4, 7, 10), bold = TRUE)
+
+s6_table
+
+s6_table |> save_tt(here(table_dir, "s6_health_correlates.docx"), overwrite = TRUE)
+```
+
+## Bayes Corrs
+
+```{r}
+focal_outcomes   <- c("k_all", "k_outgroup_ingroup", "k_ingroup", "k_outgroup", "k_mean")
+focal_predictors <- c("democratic_support", "vote_importance", "party_identity_strength", "affpol_weighted",
+                      "stress_general", "depression", "health_general", "health_politics")
+
+predictor_labels <- c(
+  "democratic_support"      = "Support for Democracy",
+  "vote_importance"         = "Voting Importance",
+  "party_identity_strength" = "Partisan Identity Strength",
+  "affpol_weighted"         = "Affective Polarization",
+  "stress_general"          = "General Stress",
+  "depression"              = "Depression Score",
+  "health_general"          = "General Health",
+  "health_politics"         = "Health Costs Due to Politics"
+)
+
+outcome_labels <- c(
+  "k_all"              = "K All",
+  "k_outgroup_ingroup" = "K Out\u2212In",
+  "k_ingroup"          = "K In",
+  "k_outgroup"         = "K Out",
+  "k_mean"             = "K Mean"
+)
+
+bayes_table <- model_data |>
+  select(all_of(c(focal_outcomes, focal_predictors))) |>
+  correlation(bayesian = TRUE) |>
+  as_tibble() |>
+  filter(Parameter1 %in% focal_outcomes, Parameter2 %in% focal_predictors) |>
+  mutate(
+    bf   = if_else(BF > 1000, "> 1000", sprintf("%.2f", BF)),
+    cell = paste0(sprintf("%.2f", rho), " [BF\u2081\u2080 = ", bf, "]"),
+    Predictor = factor(recode(Parameter2, !!!predictor_labels), levels = unname(predictor_labels)),
+    Outcome   = factor(recode(Parameter1, !!!outcome_labels),   levels = unname(outcome_labels))
+  ) |>
+  select(Predictor, Outcome, cell) |>
+  arrange(Predictor, Outcome) |>
+  pivot_wider(names_from = Outcome, values_from = cell) |>
+  tt(notes = "Cells show the posterior median correlation (r) followed by the Bayes factor in favor of a nonzero correlation (BF\u2081\u2080).")
+
+bayes_table
+
+bayes_table |> save_tt(here(table_dir, "s_bayes_correlations.docx"), overwrite = TRUE)
+```
+
+```{r}
+#| fig-width: 10
+#| fig-height: 7
+#| fig-dpi: 600
+
+bayes_plot_data <- model_data |>
+  select(all_of(c(focal_outcomes, focal_predictors))) |>
+  correlation(bayesian = TRUE) |>
+  as_tibble() |>
+  filter(Parameter1 %in% focal_outcomes, Parameter2 %in% focal_predictors) |>
+  mutate(
+    bf_label  = if_else(BF > 1000, "> 1000", sprintf("%.2f", BF)),
+    label = paste0(sprintf("%.2f", rho), "\nBF10 = ", bf_label),
+    Predictor = factor(recode(Parameter2, !!!predictor_labels), levels = rev(unname(predictor_labels))),
+    Outcome   = factor(recode(Parameter1, !!!outcome_labels),   levels = unname(outcome_labels))
+  )
+
+bayes_corr_plot <- bayes_plot_data |>
+  ggplot(aes(x = Outcome, y = Predictor, fill = rho)) +
+  geom_tile(color = "white", linewidth = 0.5) +
+  geom_text(aes(label = label), size = 4.5, lineheight = 0.9, family = "sans") +
+  scale_fill_gradient2(
+    low      = "#2c7bb6",
+    mid      = "white",
+    high     = "#d7191c",
+    midpoint = 0,
+    limits   = c(-0.3, 0.3),
+    oob      = scales::squish,
+    name     = "r"
+  ) +
+  scale_x_discrete(position = "top") +
+  labs(x = NULL, y = NULL) +
+  theme_nice() +
+  theme(
+    panel.grid       = element_blank(),
+    axis.text.x.top  = element_text(angle = 0, hjust = 0.5),
+    legend.position  = "right"
+  )
+
+bayes_corr_plot
+
+ggsave(
+  here(fig_dir, "bayes_correlation_heatmap.png"),
+  plot   = bayes_corr_plot,
+  height = 7,
+  width  = 10,
+  dpi    = 600
+)
+
+```
+
+

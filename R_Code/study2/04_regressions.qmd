@@ -1,0 +1,476 @@
+---
+title: "Democratic Effort Study 2 Models"
+format:
+  html:
+    theme: paper
+    code-tools: true
+    code-fold: true
+    toc: true
+    toc-fold: false
+    toc-location: right
+    toc-depth: 3
+    toc-title: "Contents"
+embed-resources: true
+warning: false
+---
+
+```{r}
+#| include: false
+# set error messages to English
+Sys.setenv(LANG = "en")
+
+knitr::opts_chunk$set(
+  fig.align = "center", 
+  fig.retina = 3,
+  fig.width = 6, 
+  fig.height = (6 * 0.618),
+  out.width = "90%", 
+  collapse = FALSE
+)
+
+options(
+  digits = 4,
+  width = 300,
+  dplyr.summarise.inform = FALSE)
+```
+
+```{r}
+#| include: false
+#| warning: true
+#| message: true
+if (!require("groundhog", quietly = TRUE)) {
+  install.packages("groundhog")
+}
+library("groundhog")
+
+# use groundhog to install and load packages
+pkgs <- c("here",         # System path management
+          "datawizard",   # Data preparations (e.g., standardise)
+          "tidyverse",    # ggplot, dplyr, %>%, and friends
+          "modelsummary", # Data and model summaries with tables and plots
+          "tinytable",    # Lightweight package to create tables
+          "afex",         # Interface for (general) linear mixed models
+          "estimatr",     # Fast estimators with robust standard errors
+          "BayesFactor",  # R package for BayesFactors
+          "mgcv",         # Generalized additive models
+          "marginaleffects", # Compute marginal means, slopes, predictions, etc.
+          "ggdist",       # Additional plot elements
+          "patchwork",    # Combine multiple ggplots
+          "showtext"      # Additional fonts for plots etc
+          )
+
+groundhog.library(pkgs, "2026-01-01")
+```
+
+```{r}
+#| include: false
+showtext_auto()
+showtext_opts(dpi = 600)
+
+font_add_google("Public Sans", "Public Sans")
+font_add_google("Public Sans", "Public Sans Light", regular.wt = 300)
+font_add_google("Public Sans", "Public Sans Semibold", regular.wt = 600)
+
+# Custom ggplot theme
+theme_nice <- function() {
+  # General text family and base size
+  theme_minimal(base_family = "Public Sans", base_size = 14) +
+    theme(
+      # Remove minor grid lines for cleaner look
+      panel.grid.minor = element_blank(),
+      # Customize major grid lines color
+      panel.grid.major = element_blank(),
+      # Plot title: bold and custom relative size
+      plot.title = element_text(family = "Public Sans", face = "bold", size = rel(1.1), margin = margin(b = 10)),
+      # Subtitle and caption: lighter weight 
+      plot.subtitle = element_text(family = "Public Sans Light", face = "plain"),
+      plot.caption = element_text(family = "Public Sans Light", face = "plain"),
+      # Axis text: Relative size
+      axis.text = element_text(size = rel(0.9)),
+      # Axis titles: Semibold and custom relative size
+      axis.title = element_text(family = "Public Sans Semibold", size = rel(0.9)),
+      axis.title.x = element_text(hjust = 0.5),
+      axis.title.y = element_text(hjust = 0.5),
+      # Axis lines
+      axis.line = element_line(color = "grey25", linewidth = 0.8),
+      # Facet labels: bold text on grey background
+      strip.text = element_text(
+        family = "Public Sans Semibold", face = "plain",
+        size = rel(1),
+        hjust = 0.5
+      ),
+      strip.background = element_rect(fill = "grey95", color = "grey25", linewidth = 0.8), 
+      # Legend styling: compact and top-positioned
+      legend.title = element_text(family = "Public Sans Semibold", size = rel(0.8)),
+      legend.text = element_text(size = rel(0.8)),
+      legend.position = "top",
+      legend.justification = "center",
+      legend.title.position = "left",
+      legend.margin = margin(l = 0, t = 0)
+    )
+}
+
+theme_set(theme_nice())
+update_geom_defaults("text", list(family = "Public Sans"))
+update_geom_defaults("label", list(family = "Public Sans"))
+```
+
+```{r}
+#| include: false
+data_dir <- here("01_data", "final") 
+table_dir <- here("02_output", "tables", "prereg") 
+fig_dir <- here("02_output", "figures", "prereg") 
+
+dir.create(table_dir, recursive = TRUE, showWarnings = TRUE)
+dir.create(fig_dir, recursive = TRUE, showWarnings = TRUE)
+```
+
+## Load and prepare data
+
+```{r}
+load(here(data_dir, "demeffort_survey_data.RData")) 
+load(here(data_dir, "demeffort_combined_data.RData"))
+```
+
+```{r}
+model_data <- survey_data |>
+  standardize(
+    select = c(
+      "k_rural", "k_urban", "k_ingroup", "k_outgroup", "k_mean",
+      "k_outgroup_ingroup", "beta", "party_importance", "affpol_raw",
+      "affpol_weighted", "valence_democrats", "valence_republicans",
+      "arousal_democrats", "arousal_republicans", "democratic_support", "freefair"
+    )
+  ) 
+
+model_data_dev <- survey_data |> 
+  filter(deviation < 0) |> 
+  standardize(
+    select = c(
+      "k_rural", "k_urban", "k_ingroup", "k_outgroup", "k_mean",
+      "k_outgroup_ingroup", "beta", "party_importance", "affpol_raw",
+      "affpol_weighted", "valence_democrats", "valence_republicans",
+      "arousal_democrats", "arousal_republicans", "democratic_support", "freefair"
+    )
+  ) 
+```
+
+# Democratic Effort Task Study 2 Pre-Registered Models
+
+## H1: Deviation 
+
+H1. Participants' estimates of how willing out-party supporters are to exert effort to support democratic engagement in areas that have traditionally leaned toward their own party (e.g., Democrats estimating Republican willingness to work for urban areas) will, on average, be lower than the actual level of effort willingness presented as corrective feedback in the treatment condition.
+
+```{r}
+h1a <- lm_robust(deviation ~ 1, se_type = "HC2", data = survey_data)
+summary(h1a)
+```
+
+```{r}
+h1b <- lm_robust(deviation ~ condition, se_type = "HC2", data = survey_data)
+summary(h1b)
+```
+
+```{r}
+h1.table <- modelsummary(
+  list("H1a: Average Deviation" = h1a,
+       "H1b: + Condition"    = h1b),
+  shape      = model + term ~ statistic,
+  title      = "Table H1: Baseline Misperceptions (Deviation from Correct Answer)",
+  coef_rename = c(
+    "(Intercept)"        = "",
+    "conditionTreatment" = "Treatment vs. Control"
+  ),
+  estimate   = "{estimate}{stars}",
+  statistic  = c("{std.error}", "conf.int", "p.value"),
+  conf_level = .95,
+  stars      = c("*" = 0.05, "**" = 0.01, "***" = 0.001),
+  fmt        = 3,
+  notes      = list("p-values: * < .05, ** < .01, *** < .001"),
+  gof_omit   = ".*"
+)
+
+h1.table
+h1.table |> save_tt(here(table_dir, "h1.table.docx"), overwrite = TRUE)
+```
+
+## H2A: Treatment Effects on In Group Favouritism
+
+H2A. Among participants who underestimate out-party effort willingness (i.e., whose estimate falls below the actual value presented as corrective feedback), those in the treatment condition (vs. control) will show a smaller difference in their motivation to exert effort for the in-group versus the out-group.
+
+```{r}
+h2a <- lm_robust(
+  k_outgroup_ingroup ~ condition,
+  se_type = "HC2",
+  data = model_data_dev)
+
+summary(h2a)
+```
+
+```{r}
+h2a.table <- modelsummary(
+  list("H2A" = h2a),
+  shape = term ~ model + statistic,
+  title      = "Table H2A: ATE on In-Group Favouritism",
+  coef_rename = c(
+    "(Intercept)"        = "Intercept (Control)",
+    "conditionTreatment" = "Treatment vs. Control"
+  ),
+  estimate   = "{estimate}{stars}",
+  statistic  = c("{std.error}", "conf.int", "p.value"),
+  conf_level = .95,
+  stars      = c("*" = 0.05, "**" = 0.01, "***" = 0.001),
+  fmt        = 3,
+  notes      = list("p-values: * < .05, ** < .01, *** < .001"),
+  gof_omit   = ".*"
+)
+
+h2a.table
+h2a.table |> save_tt(here(table_dir, "h2a.table.docx"), overwrite = TRUE)
+```
+
+## H2B: Treatment Effect specific to the Outgroup?
+
+H2B. (Follow-up to H2A) This reduction in the treatment vs. control will be driven by a decrease in effort discounting (increase in motivation) for the out-group rather than a change in effort discounting/motivation for the in-group (among participants with misperceptions).
+
+Reshape the data for the linear mixed model:
+```{r}
+model_data_dev_long <- model_data_dev |>
+  select(PID, condition, deviation, k_ingroup, k_outgroup) |>
+  pivot_longer(
+    cols      = c(k_ingroup, k_outgroup),
+    names_to  = "benefit",
+    values_to = "k"
+  ) |>
+  mutate(
+    benefit = factor(benefit,
+                     levels = c("k_ingroup", "k_outgroup"),
+                     labels = c("In-group", "Out-group"))
+  )
+```
+
+Fit the linear-mixed model:
+```{r}
+h2b <- mixed(
+  k ~ benefit * condition + (1 | PID),
+  data = model_data_dev_long
+)
+
+h2b
+summary(h2b)
+```
+
+::: {.callout-note}
+## Linear Mixed Model was misspecified in pre-registration
+
+Not a problem but note the deviation. We can't use a random slope as benefit only has two levels:
+Error: number of observations (=1100) <= number of random effects (=1100) for term (benefit | PID); the random-effects parameters and the residual variance (or scale parameter) are probably unidentifiable
+:::
+
+```{r}
+# Extract merMod object
+h2b.mer <- h2b$full_model
+
+# Pairwise condition comparisons by benefit level
+h2b.com <- avg_comparisons(h2b.mer,
+                                   variables = list(condition = "pairwise"),
+                                   by = "benefit",
+                                   re.form = NA) |>
+  as_tibble() |>
+  select(Contrast = contrast,
+         Benefit = benefit,
+         Estimate = estimate,
+         SE = std.error,
+         "t" = statistic,
+         "p" = p.value,
+         "95% CI Low" = conf.low,
+         "95% CI High" = conf.high) |>
+  mutate(
+    across(where(is.numeric) & !matches("p"), ~ round(.x, 3)),
+    p = ifelse(round(p, 3) == 0, "< .001", as.character(round(p, 3)))
+  )
+
+h2b.com |> tt()
+```
+
+```{r}
+h2b.hyp <- avg_comparisons(h2b.mer,
+                            variables = "condition",
+                            by = "benefit",
+                            re.form = NA,
+                            hypothesis = ~pairwise) |>
+  as_tibble() |>
+  select(Hypothesis = hypothesis,
+         Estimate = estimate,
+         SE = std.error,
+         "t" = statistic,
+         "p" = p.value,
+         "95% CI Low" = conf.low,
+         "95% CI High" = conf.high) |>
+  mutate(
+    across(where(is.numeric) & !matches("p"), ~ round(.x, 3)),
+    p = ifelse(round(p, 3) == 0, "< .001", as.character(round(p, 3)))
+  )
+
+h2b.hyp |> tt(caption = "H2B: Test of whether the treatment effect on effort discounting 
+     differs between in-group and out-group beneficiaries")
+```
+
+## H3A: In-Group Favouritism ~ Affective Polarisation 
+
+H3A. Affective polarization will be positively associated with greater differences in the motivation to exert effort for the in-group versus the out-group.
+
+```{r}
+h3a <- lm_robust(
+  k_outgroup_ingroup ~ affpol_weighted + condition,
+  se_type = "HC2",
+  data    = model_data
+)
+
+summary(h3a)
+```
+
+```{r}
+h3a.table <- modelsummary(
+  list("H3A" = h3a),
+  shape      = term ~ model + statistic,
+  title      = "Table H3A: Affective Polarization and In-Group Favouritism",
+  coef_rename = c(
+    "(Intercept)"        = "Intercept (Control)",
+    "affpol_weighted"    = "Affective Polarization",
+    "conditionTreatment" = "Treatment vs. Control"
+  ),
+  estimate   = "{estimate}{stars}",
+  statistic  = c("{std.error}", "conf.int", "p.value"),
+  conf_level = .95,
+  stars      = c("*" = 0.05, "**" = 0.01, "***" = 0.001),
+  fmt        = 3,
+  notes      = list("p-values: * < .05, ** < .01, *** < .001"),
+  gof_omit   = ".*"
+)
+
+h3a.table
+h3a.table |> save_tt(here(table_dir, "h3a.table.docx"), overwrite = TRUE)
+```
+
+## H3B: Deviation ~ Affective Polarisation
+
+H3B. Affective polarization will be positively associated with stronger baseline misperceptions about how willing out-party supporters are to exert effort to support democratic engagement in areas that have traditionally leaned toward their own party.
+
+```{r}
+h3b <- lm_robust(
+  deviation ~ affpol_weighted + condition,
+  se_type = "HC2",
+  data    = model_data
+)
+
+summary(h3b)
+```
+
+```{r}
+h3b.table <- modelsummary(
+  list("H3B" = h3b),
+  shape      = term ~ model + statistic,
+  title      = "Table H3B: Affective Polarization and Baseline Misperceptions",
+  coef_rename = c(
+    "(Intercept)"        = "Intercept (Control)",
+    "affpol_weighted"    = "Affective Polarization",
+    "conditionTreatment" = "Treatment vs. Control"
+  ),
+  estimate   = "{estimate}{stars}",
+  statistic  = c("{std.error}", "conf.int", "p.value"),
+  conf_level = .95,
+  stars      = c("*" = 0.05, "**" = 0.01, "***" = 0.001),
+  fmt        = 3,
+  notes      = list("p-values: * < .05, ** < .01, *** < .001"),
+  gof_omit   = ".*"
+)
+
+h3b.table
+h3b.table |> save_tt(here(table_dir, "h3b.table.docx"), overwrite = TRUE)
+```
+
+## Exploratory: In-Group Favouritism ~ Deviation
+
+```{r}
+h3c <- lm_robust(
+  k_outgroup_ingroup ~ deviation + condition,
+  se_type = "HC2",
+  data    = model_data_dev
+)
+
+summary(h3c)
+```
+
+```{r}
+h3c.table <- modelsummary(
+  list("H3C" = h3c),
+  shape      = term ~ model + statistic,
+  title      = "Table H3C (Exploratory): Baseline Misperceptions and In-Group Favouritism",
+  coef_rename = c(
+    "(Intercept)"        = "Intercept (Control)",
+    "deviation"          = "Deviation (Misperception Strength)",
+    "conditionTreatment" = "Treatment vs. Control"
+  ),
+  estimate   = "{estimate}{stars}",
+  statistic  = c("{std.error}", "conf.int", "p.value"),
+  conf_level = .95,
+  stars      = c("*" = 0.05, "**" = 0.01, "***" = 0.001),
+  fmt        = 3,
+  notes      = list("p-values: * < .05, ** < .01, *** < .001"),
+  gof_omit   = ".*"
+)
+
+h3c.table
+h3c.table |> save_tt(here(table_dir, "h3c.table.docx"), overwrite = TRUE)
+```
+
+## H4: Conditional Treatment Effects (AffPol)
+
+We have two competing hypotheses on how affective polarisation might affect the effectiveness of the corrective feedback presented in the treatment group. 
+H4A. The corrective feedback will be less effective at reducing in-group versus out-group effort differences among participants higher in affective polarization (for example, because more polarized participants may be more resistant to updating their views of the out-party or may find the feedback less credible).
+H4B. The corrective feedback will be more effective at reducing in-group versus out-group effort differences among participants higher in affective polarization (for example, because more polarized participants may hold stronger misperceptions that leave more room for correction).
+
+```{r}
+h4 <- lm_robust(
+  k_outgroup_ingroup ~ condition * affpol_weighted,
+  se_type = "HC2",
+  data    = model_data_dev
+)
+
+summary(h4)
+```
+
+```{r}
+h4.table <- modelsummary(
+  list("H4" = h4),
+  shape      = term ~ model + statistic,
+  title      = "Table H4: Moderation of Treatment Effect by Affective Polarization",
+  coef_rename = c(
+    "(Intercept)"                        = "Intercept (Control)",
+    "conditionTreatment"                 = "Treatment vs. Control",
+    "affpol_weighted"                    = "Affective Polarization",
+    "conditionTreatment:affpol_weighted" = "Treatment × Affective Polarization"
+  ),
+  estimate   = "{estimate}{stars}",
+  statistic  = c("{std.error}", "conf.int", "p.value"),
+  conf_level = .95,
+  stars      = c("*" = 0.05, "**" = 0.01, "***" = 0.001),
+  fmt        = 3,
+  notes      = list("p-values: * < .05, ** < .01, *** < .001"),
+  gof_omit   = ".*"
+)
+
+h4.table
+h4.table |> save_tt(here(table_dir, "h4.table.docx"), overwrite = TRUE)
+```
+
+
+
+
+
+
+
+
+
+

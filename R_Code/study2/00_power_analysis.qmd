@@ -1,0 +1,280 @@
+---
+title: "Democratic Effort Power Analyses"
+format:
+  html:
+    theme: paper
+    code-tools: true
+    code-fold: true
+    toc: true
+    toc-fold: false
+    toc-location: right
+    toc-depth: 3
+    toc-title: "Contents"
+embed-resources: true
+warning: false
+---
+
+```{r}
+#| include: false
+# set error messages to English
+Sys.setenv(LANG = "en")
+
+knitr::opts_chunk$set(
+  fig.align = "center", 
+  fig.retina = 3,
+  fig.width = 6, 
+  fig.height = (6 * 0.618),
+  out.width = "90%", 
+  collapse = FALSE
+)
+
+options(
+  digits = 4,
+  width = 300,
+  dplyr.summarise.inform = FALSE)
+```
+
+```{r}
+#| include: false
+#| warning: true
+#| message: true
+if (!require("groundhog", quietly = TRUE)) {
+  install.packages("groundhog")
+}
+library("groundhog")
+
+# use groundhog to install and load packages
+pkgs <- c("here",         # System path management
+          "tidyverse",    # ggplot, dplyr, %>%, and friends
+          "DeclareDesign",    # Tools to plan, implement, analyze empirical research
+          "afex",         # Analysis of factorial experiments
+          "modelsummary", # Data and model summaries with tables and plots
+          "tinytable",    # Lightweight package to create tables
+          "marginaleffects",      # Compute marginal means, slopes, predictions, etc.
+          "patchwork",    # Combine multiple ggplots
+          "showtext",    # Additional fonts for plots etc
+          "tictoc"        # Timing functions
+          )
+
+groundhog.library(pkgs, "2026-01-01")
+```
+
+```{r}
+#| include: false
+
+showtext_auto()
+showtext_opts(dpi = 600)
+
+font_add_google("Public Sans", "Public Sans")
+font_add_google("Public Sans", "Public Sans Light", regular.wt = 300)
+font_add_google("Public Sans", "Public Sans Semibold", regular.wt = 600)
+
+# Custom ggplot theme
+theme_nice <- function(base_size = 14) {
+  # General text family and base size
+  theme_minimal(base_family = "Public Sans", base_size = base_size) +
+    theme(
+      # Remove minor grid lines for cleaner look
+      panel.grid.minor = element_blank(),
+      # Customize major grid lines color
+      panel.grid.major = element_blank(),
+      # Plot title: bold and custom relative size
+      plot.title = element_text(family = "Public Sans", face = "bold", size = rel(1.1), margin = margin(b = 10)),
+      # Subtitle and caption: lighter weight 
+      plot.subtitle = element_text(family = "Public Sans Light", face = "plain"),
+      plot.caption = element_text(family = "Public Sans Light", face = "plain"),
+      # Axis text: Relative size
+      axis.text = element_text(size = rel(0.9)),
+      # Axis titles: Semibold and custom relative size
+      axis.title = element_text(family = "Public Sans Semibold", size = rel(0.9)),
+      axis.title.x = element_text(hjust = 0.5),
+      axis.title.y = element_text(hjust = 0.5),
+      # Axis lines
+      axis.line = element_line(color = "grey25", linewidth = 0.8),
+      # Facet labels: bold text on grey background
+      strip.text = element_text(
+        family = "Public Sans Semibold", face = "plain",
+        size = rel(1),
+        hjust = 0.5
+      ),
+      strip.background = element_rect(fill = "grey95", color = "grey25", linewidth = 0.8), 
+      # Legend styling: compact and top-positioned
+      legend.title = element_text(family = "Public Sans Semibold", size = rel(0.8)),
+      legend.text = element_text(size = rel(0.8)),
+      legend.position = "top",
+      legend.justification = "center",
+      legend.title.position = "left",
+      legend.margin = margin(l = 0, t = 0)
+    )
+}
+
+
+theme_set(theme_nice())
+update_geom_defaults("text", list(family = "Public Sans"))
+update_geom_defaults("label", list(family = "Public Sans"))
+```
+
+# Democratic Effort Task Power Analyses 
+
+We want to simulate data to calculate the power to reliably detect between-subject differences of Cohens D = 0.25 in (k_ingroup - k_outgroup) between the correction treatment vs. control conditions. 
+
+## 1. Power to detect treatment differences in k_in_out given the effect size of interest of Cohens D = 0.25
+
+### Setup 
+
+Declare the model
+```{r}
+# Parameters
+N <- 500  # Total sample size (250 per group)
+cohens_d <- -0.25 # Effect size of interest (negative = lower in-group favouritism)
+sd_outcome <- 0.4 # SD from Study 1
+mean_control <- 0.2  # Mean from Study 1 (control condition baseline)
+effect_size <- cohens_d * sd_outcome  # Raw effect = -0.10
+
+# Declare model: between-subjects design with potential outcomes
+model <- declare_model(
+  N = N,
+  # Baseline outcome under control condition
+  Y_Z_0 = rnorm(N, mean = mean_control, sd = sd_outcome),
+  # Potential outcome under treatment: shift by raw effect
+  Y_Z_1 = Y_Z_0 + effect_size
+)
+```
+
+Declare the inquiry (estimate)
+```{r}
+inquiry <- declare_inquiry(
+  ATE = mean(Y_Z_1 - Y_Z_0)
+)
+```
+
+Declare the data strategy
+```{r}
+# Assignment: balanced random assignment to treatment (Z=1) or control (Z=0)
+assignment <- declare_assignment(
+  Z = complete_ra(N = N, conditions = c(0, 1)),
+  Y = reveal_outcomes(Y ~ Z)
+)
+```
+
+Declare the estimator (paired t-test)
+```{r}
+estimator <- declare_estimator(
+  Y ~ Z,
+  model = lm_robust,
+  inquiry = "ATE",
+  label = "OLS"
+)
+```
+
+Declare the diagnosands
+```{r}
+diagnosands <- declare_diagnosands(
+  # Bias and accuracy
+  bias            = mean(estimate - estimand),
+  mean_estimate   = mean(estimate),
+  mean_estimand   = mean(estimand),
+  
+  # Variance and efficiency
+  sd_estimate     = sd(estimate),
+  rmse            = sqrt(mean((estimate - estimand)^2)),
+  
+  # Power and error rates
+  power           = mean(p.value < 0.05),
+  type_s_rate     = mean(sign(estimate) != sign(estimand)),
+  
+  # Confidence intervals
+  coverage        = mean(conf.low <= estimand & estimand <= conf.high),
+  ci_lower        = mean(conf.low, na.rm = TRUE),
+  ci_upper        = mean(conf.high, na.rm = TRUE),
+  mean_ci_width   = mean(conf.high - conf.low, na.rm = TRUE),
+  
+  # Effect size: standardised by the population SD from Study 1
+  cohens_d        = mean(estimate) / sd_outcome,
+  
+  # Sample size
+  mean_N          = mean(N)
+)
+```
+
+Put the design together
+```{r}
+design_between <- model + assignment + inquiry + estimator
+
+# Test simulation at N = 500 (250 per group)
+diagnosis_test <- diagnose_design(
+  design_between,
+  sims = 1000,
+  diagnosands = diagnosands
+)
+
+diagnosis_test
+```
+
+### Simulation
+
+```{r}
+#| warning: false
+#| message: false
+designs_list_between <- redesign(design_between,
+                                 N = seq(400, 700, by = 50))
+
+n_sim <- 2000
+cat("Running", length(designs_list_between), "designs with", n_sim, "simulations each...\n")
+cat("Total simulations:", length(designs_list_between) * n_sim, "\n")
+cat("N per group ranges from", 400/2, "to", 700/2, "\n")
+
+tic("Power analysis - between subjects")
+diagnosis_between <- diagnose_design(designs_list_between,
+                                     sims = n_sim,
+                                     diagnosands = diagnosands)
+toc()
+```
+
+### Visualisation
+
+```{r}
+fig_power_data <- diagnosis_between$diagnosands_df |>
+  mutate(n_per_group = N / 2)
+
+fig_power <- fig_power_data |>
+  ggplot(aes(x = n_per_group, y = power)) +
+  geom_line(color = "firebrick3",
+            linewidth = 1) +
+  geom_point(color = "firebrick3",
+             size = 2) +
+  geom_hline(yintercept = 0.80,
+             linetype = "dashed",
+             color = "black",
+             linewidth = 0.8) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1),
+                     limits = c(0.5, 1),
+                     breaks = seq(0, 1, by = 0.1)) +
+  scale_x_continuous(breaks = seq(200, 350, by = 25)) +
+  labs(title = "Power to detect Cohen's d = -0.25",
+       subtitle = "Between-subjects design, two balanced groups",
+       x = "Sample size (n per group)",
+       y = "Power",
+       caption = "Dashed line = 80% power threshold. Based on 2000 simulations per design.") +
+  theme_nice()
+
+fig_power
+```
+
+```{r}
+between_sim_table <- diagnosis_between$diagnosands_df |>
+  transmute(
+    "N (total)"     = N,
+    "N (per group)" = N / 2,
+    "Cohen's d"     = round(cohens_d, 2),
+    "Power"         = round(power, 2),
+    "SE (Power)"    = round(`se(power)`, 3),
+    "Type S Rate"   = round(type_s_rate, 3),
+    "Coverage"      = round(coverage, 2)
+  ) |>
+  tt( notes = "Power diagnosis based on 2000 simulations per design. Bootstrapped standard errors for power estimates. Type S rate = proportion of simulations where effect sign is incorrect.")
+
+between_sim_table
+```
+
+

@@ -1,0 +1,1065 @@
+---
+title: "Democratic Effort Study 1: Data Cleaning"
+format:
+  html:
+    theme: paper
+    code-tools: true
+    code-fold: true
+    toc: true
+    toc-fold: false
+    toc-location: right
+    toc-depth: 3
+    toc-title: "Contents"
+embed-resources: true
+warning: false
+---
+
+```{r}
+#| include: false
+# set error messages to English
+Sys.setenv(LANG = "en")
+
+knitr::opts_chunk$set(
+  fig.align = "center", 
+  fig.retina = 3,
+  fig.width = 6, 
+  fig.height = (6 * 0.618),
+  out.width = "90%", 
+  collapse = FALSE
+)
+
+options(
+  digits = 4,
+  width = 300,
+  dplyr.summarise.inform = FALSE)
+```
+
+```{r}
+#| include: false
+#| warning: true
+#| message: true
+if (!require("groundhog", quietly = TRUE)) {
+  install.packages("groundhog")
+}
+library("groundhog")
+
+# use groundhog to install and load packages
+pkgs <- c("here",         # System path management
+          "datawizard",   # Data cleaning & standardization
+          "tidyverse",    # ggplot, dplyr, and friends
+          "MBESS",        # Mix of functions including reliability
+          "tinytable",    # Minimalistic tables
+          "modelsummary"  # Data and model summaries with tables and plots
+          )
+
+groundhog.library(pkgs, "2026-01-01")
+```
+
+```{r}
+#| include: false
+data_raw_dir <- here("01_data", "raw")
+data_clean_dir <- here("01_data", "clean")
+
+dir.create(data_raw_dir, recursive = TRUE, showWarnings = TRUE)
+dir.create(data_clean_dir, recursive = TRUE, showWarnings = TRUE)
+```
+
+# Democratic Effort Task Data Cleaning
+
+::: callout-note
+### Code was adapted from:
+
+Cutler, J., Contreras-Huerta, L. S., Todorova, B., Nitschke, J. P., Michalaki, K., Koppel, L., Gkinopoulos, T., Vogel, T. A., Lamm, C., Västfjäll, D., Tsakiris, M., Apps, M. A. J., & Lockwood, P. (2024). Psychological interventions increase motivation to exert effort to mitigate climate change. PsyArXiv. https://doi.org/10.31234/osf.io/c8yxs
+:::
+
+## Load and clean data
+
+```{r}
+raw <- read.csv(here(data_raw_dir , "demeffort_raw.csv"))
+```
+
+```{r}
+clean <- raw |> 
+  slice(-(1:2)) |>  # remove first two rows of meta data
+  filter(Calib1 != "" & !is.na(Calib1))
+
+# Check for duplicate Prolific IDs
+duplicates <- clean |>
+  count(Q1) |>
+  filter(n > 1)
+
+cat("Duplicate Prolific IDs found:", nrow(duplicates))
+
+# Remove duplicate submissions (keep earliest submission only)
+clean <- clean |>
+  arrange(Q1, StartDate) |>
+  group_by(Q1) |>
+  slice(1) |>  # Keep first (earliest) submission
+  ungroup()
+
+n_participants <- clean %>% 
+  n_distinct("ResponseId") 
+
+print(paste("N completed =", n_participants))
+```
+
+Trial numbering is 4:36 as we removed the lowest effort level (50%) and added a third condition --\> change to 1:27
+
+```{r}
+old_choice_names <- c(
+  "X4_choice_screen","X5_choice_screen","X6_choice_screen","X7_choice_screen",
+  "X8_choice_screen","X9_choice_screen","X10_choice_screen","X11_choice_screen",
+  "X12_choice_screen","X16_choice_screen","X17_choice_screen","X18_choice_screen",
+  "X19_choice_screen","X20_choice_screen","X21_choice_screen","X22_choice_screen",
+  "X23_choice_screen","X24_choice_screen","X28_choice_screen","X29_choice_screen",
+  "X30_choice_screen","X31_choice_screen","X32_choice_screen","X33_choice_screen",
+  "X34_choice_screen","X35_choice_screen","X36_choice_screen"
+)
+
+clean <- clean |> 
+  rename_with(~ paste0("X", 1:27, "_choice_screen"), all_of(old_choice_names))
+```
+
+```{r}
+old_work_names <- c(
+  "X4_work_feedback_timing_Page.Submit","X5_work_feedback_timing_Page.Submit",
+  "X6_work_feedback_timing_Page.Submit","X7_work_feedback_timing_Page.Submit",
+  "X8_work_feedback_timing_Page.Submit","X9_work_feedback_timing_Page.Submit",
+  "X10_work_feedback_timing_Page.Submit","X11_work_feedback_timing_Page.Submit",
+  "X12_work_feedback_timing_Page.Submit","X16_work_feedback_timing_Page.Submit",
+  "X17_work_feedback_timing_Page.Submit","X18_work_feedback_timing_Page.Submit",
+  "X19_work_feedback_timing_Page.Submit","X20_work_feedback_timing_Page.Submit",
+  "X21_work_feedback_timing_Page.Submit","X22_work_feedback_timing_Page.Submit",
+  "X23_work_feedback_timing_Page.Submit","X24_work_feedback_timing_Page.Submit",
+  "X28_work_feedback_timing_Page.Submit","X29_work_feedback_timing_Page.Submit",
+  "X30_work_feedback_timing_Page.Submit","X31_work_feedback_timing_Page.Submit",
+  "X32_work_feedback_timing_Page.Submit","X33_work_feedback_timing_Page.Submit",
+  "X34_work_feedback_timing_Page.Submit","X35_work_feedback_timing_Page.Submit",
+  "X36_work_feedback_timing_Page.Submit"
+)
+
+clean <- clean |>
+  rename_with(~ paste0("X", 1:27, "_work_feedback_timing_Page.Submit"), 
+              all_of(old_work_names))
+```
+
+## Create structured dataframe for boxes task from Qualtrics output
+
+The output from Qualtrics is a bit messy and in a wide format. Here we create a long format dataframe that matches the order of the trials from the Loop & Merge spreadsheet in the Qualtrics task. We recreate the trial order from the spreadsheet and add each participants data to it. The trial orders are randomized between participants, but Qualtrics outputs trials in the same order that they appear in the Loop & Merge spreadsheet of the task.
+
+### Code the choice data
+
+Grab choice for each trial: - There are 27 trials, corresponding to the row number from the Loop & Merge spreadsheet. So there are 27 "#\_choice_screen" that appear, where "\#" is the corresponding row number from the Loop & Merge spreadsheet
+
+The code Loops through columns and gets the choice made (3 credits for Rest vs X credits for Y boxes) and recodes them to 0 and 1
+NOTE: read.csv adds an "X" to front of variables that start with a number (e.g., 1_choice_screen becomes X1_choice_screen) Using another package like readr to load in the csv may not do this, and so the code in paste0() below will need to be changed
+
+In Qualtrics, choices were coded as:
+1 = "\${lm://Field/2} credits for \${lm://Field/3} boxes" (Work)
+2 = "3 credits for Rest" (Rest)
+
+We recode these so that:
+NA = No decision
+0 = Rest
+1 = Work 
+
+```{r}
+choice_data <- sapply(1:27, function(i) {
+  recode(clean[[paste0("X", i, "_choice_screen")]],
+                "1" = 1,   # Work
+                "2" = 0,   # Rest
+                .default = NA_real_ # No decision
+  )
+})
+```
+
+### Code the work success
+
+Grab work success (clicked all boxes) for each trial:
+If participants chose Work (decision = 1), then the "_work_feedback_timing_Page.Submit" only appears if they successfully clicked all the boxes on the screen. If participants chose Rest (decision = 0), success should be NA (not applicable).
+
+```{r}
+work_success_data <- sapply(1:27, function(i) {
+  tmp <- as.numeric(clean[[paste0("X", i, "_work_feedback_timing_Page.Submit")]])
+  ifelse(choice_data[, i] == 1,   # only check success if Work was chosen
+         ifelse(is.na(tmp), 0, 1),  # Work chosen → 1 = success, 0 = fail
+         NA_real_)                  # Rest chosen → NA (not applicable)
+})
+```
+
+### Create task dataframe 
+
+Create a new dataframe, with a structure that can be used to fit models: There are 27 trials in total, so variables need to be repeated to fill all the rows for each participant.
+
+Note: the order of the dataframe does not match the order that participants saw the trials. Qualtrics does not output the trial-order seen, and instead outputs the responses for each trial in the order that they appear in the Loop & Merge spreadsheet.
+
+```{r}
+# Create the trial structure template (27 trials)
+trial_structure <- expand_grid(
+  agent = c("VOTEALL", "VOTERURAL", "VOTEURBAN"),
+  eff = c("easy65", "hard80", "hard95"),
+  rew = c(4, 12, 20)) |>
+  mutate(
+    eff = factor(eff, levels = c("easy65", "hard80", "hard95")),
+    rew = factor(rew, levels = c(4, 12, 20)))
+
+# Create the main dataframe
+task_data <- tibble(
+  id = rep(clean$ResponseId, each = 27)
+) |>
+  # Add trial structure for each participant
+  bind_cols(
+    bind_rows(replicate(n_participants, trial_structure, simplify = FALSE))
+  ) |>
+  # Add choice and success data
+  mutate(
+    decision = c(t(choice_data)),
+    success = c(t(work_success_data))
+  ) |>
+  # Add participant-level variables (repeated for each trial)
+  left_join(
+    clean |>
+      select(ResponseId, max_boxes, easy65, hard80, hard95) |>
+      rename(
+        id = ResponseId,
+        easy65_nboxes = easy65,
+        hard80_nboxes = hard80,
+        hard95_nboxes = hard95
+      ),
+    by = "id"
+  )
+```
+
+### New ID variable 
+
+```{r}
+# Create mapping from original IDs to participant IDs
+id_mapping <- task_data |>
+  distinct(id) |>
+  arrange(id) |>  # Ensures consistent ordering
+  mutate(
+    PID = paste0("P", str_pad(row_number(), width = 2, pad = "0"))
+  )
+
+# Add the new participant ID to your data
+task_data <- task_data |>
+  left_join(id_mapping, by = "id")
+
+# reorder task data
+task_data <- task_data |> 
+  select(id, PID, agent:hard95_nboxes)
+```
+
+## Create survey dataframe 
+
+```{r}
+survey_data <- clean |> 
+  select(PROLIFIC_PID = Q1,
+         id = ResponseId, 
+         date = RecordedDate,
+         timer_total = `Duration..in.seconds.`,
+         manip_check_01, manip_check_02,
+         donation_decision,
+         party, 
+         party_open = party_4_TEXT,
+         party_strength, 
+         party_closer,
+         party_identity_strength = partisan_identity,
+         valence_democrats = valence_democrats_6,
+         valence_republicans = valence_republicans_24,
+         arousal_democrats = arousal_democrats_24,
+         arousal_republicans = arousal_republicans_24,
+         bipartisanship_01 = bipartisanship_01_24,
+         bipartisanship_02 = bipartisanship_02_24,
+         friends_democrats = friends_democrats_24,
+         friends_republicans = friends_republicans_24,
+         ideology = ideology_24,
+         dem_01:dem_03, 
+         dem_04:dem_07,
+         vote_election:political_follow,
+         health_general = general_health,
+         health_politics_01:health_politics_05,
+         health_politics_06:health_politics_10,
+         PSS4_01:PSS4_10,
+         stress_politics,
+         depression_01:depression_08,
+         age = age_1,
+         gender, 
+         gender_open = gender_3_TEXT,
+         rururb01, rururb02,
+         rururb02_open = rururb02_5_TEXT,
+         rururb03,
+         education,
+         ethnicity,
+         ethicity_open = ethnicity_7_TEXT,
+         income, 
+         max_boxes:hard95,
+         commitment,
+         attention_01, attention_02) |>
+  rename_with(~str_replace(., "PSS4_", "PSS_"), starts_with("PSS4_"))
+
+survey_data <- survey_data |> 
+  left_join(task_data |> select(id, PID) |> distinct(), by = "id")
+```
+
+#### Set datatypes
+
+```{r}
+survey_data <- survey_data |>
+  separate(ethnicity, into = c("ethnicity01", "ethnicity02"), sep = ",", fill = "right") |>
+  mutate(
+    # Factor variables
+    donation_decision = factor(donation_decision, 
+                              levels = c("1", "2"), 
+                              labels = c("Donate", "Keep")),
+    
+    manip_check_01 = factor(manip_check_01,
+                           levels = c("1", "2", "3", "4"),
+                           labels = c("Republican", "Democrat", "Independent", "Other")),
+    
+    manip_check_02 = factor(manip_check_02,
+                           levels = c("1", "2", "3", "4", "5"),
+                           labels = c("Democrats", "Republicans", 
+                                     "Both Democrats and Republicans",
+                                     "Neither Democrats nor Republicans", "Other")),
+    
+    party = factor(party,
+                  levels = c("1", "2", "3", "4"),
+                  labels = c("Democrat", "Republican", "Independent", "Other")),
+    
+    party_strength = factor(party_strength,
+                           levels = c("1", "2"),
+                           labels = c("Strong", "Not very strong")),
+    
+    party_closer = factor(party_closer,
+                         levels = c("1", "2"),
+                         labels = c("Democrat", "Republican")),
+    
+    vote_election = factor(vote_election,
+                          levels = c("1", "2"),
+                          labels = c("No", "Yes")),
+    
+    gender = factor(gender,
+                   levels = c("1", "2", "3", "4"),
+                   labels = c("Man", "Woman", "Other", "Prefer not to say")),
+    
+    rururb01 = factor(rururb01,
+                     levels = c("1", "2", "3", "4"),
+                     labels = c("Rural area", "Small town", "Suburb", "City")),
+    
+    rururb02 = factor(rururb02,
+                     levels = c("1", "2", "3", "4", "5"),
+                     labels = c("City", "Suburb", "Small-town", "Rural", "Other")),
+    
+    education = factor(education,
+                      levels = c("1", "2", "3", "4", "5", "6"),
+                      labels = c("Less than high school", "High school", 
+                                "College, but not degree", "2-year college degree",
+                                "4-year college degree", "Postgraduate degree")),
+    
+    ethnicity01 = factor(ethnicity01,
+                        levels = c("1", "2", "3", "4", "5", "6", "7"),
+                        labels = c("White", "Black or African-American", 
+                                  "Hispanic, Latino, or Spanish origin",
+                                  "American Indian or Alaska Native", "Asian",
+                                  "Native Hawaiian or other Pacific Islander", "Other")),
+    
+    ethnicity02 = factor(ethnicity02,
+                        levels = c("1", "2", "3", "4", "5", "6", "7"),
+                        labels = c("White", "Black or African-American", 
+                                  "Hispanic, Latino, or Spanish origin",
+                                  "American Indian or Alaska Native", "Asian",
+                                  "Native Hawaiian or other Pacific Islander", "Other")),
+    
+    income = factor(income,
+                   levels = c("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"),
+                   labels = c("Less than $10,000", "$10,000 to $19,999", "$20,000 to $29,999",
+                             "$30,000 to $39,999", "$40,000 to $49,999", "$50,000 to $59,999",
+                             "$60,000 to $69,999", "$70,000 to $79,999", "$80,000 to $89,999",
+                             "$90,000 to $99,999", "$100,000 to $149,999", "$150,000 or more")),
+    
+    commitment = factor(commitment,
+                        levels = c("1", "2", "3"),
+                        labels = c("I can’t promise either way", 
+                                   "Yes, I will", 
+                                   "No, I will not")),
+    
+    attention_01 = factor(if_else(attention_01 == "5", "passed", "failed"),
+                         levels = c("passed", "failed")),
+    
+    attention_02 = factor(if_else(attention_02 == "1", "passed", "failed"),
+                         levels = c("passed", "failed"))
+  ) |>
+  mutate(
+    across(c(valence_democrats, valence_republicans,
+             arousal_democrats, arousal_republicans,
+             bipartisanship_01, bipartisanship_02,
+             friends_democrats, friends_republicans,
+             ideology,
+             party_identity_strength, vote_importance,
+             political_interest, political_discussion, political_follow,
+             health_general, stress_politics, rururb03,
+             max_boxes, easy50, easy65, hard80, hard95,
+             age,
+             starts_with("dem_"),
+             starts_with("health_politics_"),
+             starts_with("PSS_"),
+             starts_with("depression_")),
+           as.numeric)
+  )
+```
+
+#### Calculate integrated/scale scores
+
+##### Add summaries from the political effort task to the survey data
+
+1. work_total: Overall work count (0-27)
+2. work_voteall: Work decisions when agent="VOTEALL"
+3. work_voteurban: Work decisions when agent="VOTEURBAN"
+4. work_voterural: Work decisions when agent="VOTERURAL"
+
+```{r}
+work_summaries <- task_data |>
+  group_by(id) |>
+  summarise(
+    # Work decisions across all conditions
+    work_total = sum(decision == 1, na.rm = TRUE),
+    
+    # Work decisions by agent condition
+    work_voteall = sum(decision == 1 & agent == "VOTEALL", na.rm = TRUE),
+    work_voteurban = sum(decision == 1 & agent == "VOTEURBAN", na.rm = TRUE),
+    work_voterural = sum(decision == 1 & agent == "VOTERURAL", na.rm = TRUE),
+    
+    .groups = "drop"
+  )
+
+survey_data <- survey_data |>
+  left_join(work_summaries, by = "id")
+```
+
+##### Partisanship & Partisan strength
+
+We have three items asking for partisanship. 
+1. The first item has four options: Democrat / Republican / Independent / Other
+2. If participants select Independent / Other -> they see another question with the options Closer to Democrat / Republican
+3. If participants select Democrat / Republican -> they see another question with the options Not very strong / strong Democrat / Republican
+
+We want to create two variables out of this:
+1. party_preference: Takes the value Democrat if participants indicate being Democrat or being closer to Democrats and the same for Republicans respectively
+2. party_strength: Takes the value 0 if participants selected Independent / Other, takes the value 1 if participants selected Not very strong, takes the value 2 if participants selected strong
+
+And then we also want to calculate:
+1. Overall decision to work for ingroup / outgroup and ingroup - outgroup
+
+```{r}
+survey_data <- survey_data |>
+  mutate(
+    # Party preference: Democrat/Republican based on main choice or closer leaning
+    party_preference = case_when(
+      party %in% c("Democrat", "Republican") ~ as.character(party),
+      party %in% c("Independent", "Other") & party_closer == "Democrat" ~ "Democrat",
+      party %in% c("Independent", "Other") & party_closer == "Republican" ~ "Republican",
+      .default = NA_character_
+    ),
+    
+    # Party intensity: 0=Independent/Other, 1=Not very strong, 2=Strong
+    party_intensity = case_when(
+      party %in% c("Independent", "Other") ~ 0,
+      party %in% c("Democrat", "Republican") & party_strength == "Not very strong" ~ 1,
+      party %in% c("Democrat", "Republican") & party_strength == "Strong" ~ 2,
+      .default = NA_real_
+    )
+  ) |>
+  # Convert party_preference to factor with explicit levels
+  mutate(
+    party_preference = factor(party_preference, levels = c("Democrat", "Republican"))
+  ) |> 
+  mutate(
+    # Create work_ingroup variable
+    work_ingroup = case_when(
+      party_preference == "Democrat" ~ work_voteurban,
+      party_preference == "Republican" ~ work_voterural,
+      TRUE ~ NA_real_  # For any other values or NAs
+    ),
+    
+    # Create work_outgroup variable  
+    work_outgroup = case_when(
+      party_preference == "Democrat" ~ work_voterural,
+      party_preference == "Republican" ~ work_voteurban,
+      TRUE ~ NA_real_  # For any other values or NAs
+    ),
+    
+    # Calculate the difference
+    work_difference = work_ingroup - work_outgroup
+  )
+```
+
+##### Affective Polarisation 
+
+Calculation of affective polarisation including weighted score by arousal following Kasper et al. (in prep)
+
+```{r}
+pol_long <- survey_data |> 
+  select(id, 
+         val_democrats = valence_democrats, 
+         val_republicans = valence_republicans, 
+         ars_democrats = arousal_democrats, 
+         ars_republicans = arousal_republicans) |> 
+  pivot_longer(
+    cols = -c(id), 
+    names_to = c("measure", "party"),
+    names_pattern = "([a-z]+)_(.+)", 
+    values_to = "value") |> 
+   pivot_wider(
+    names_from = measure,
+    values_from = value
+  )
+```
+
+```{r}
+pol_clean <- pol_long |> 
+  group_by(id) |> 
+  mutate(
+    # Step 1: Avoid division by zero
+    val = val+1, 
+    ars = ars+1, 
+    
+    # Step 2: Calculate means for each person
+    M_val = mean(val, na.rm = TRUE),
+    M_ars = mean(ars, na.rm = TRUE), 
+    
+    # Step 3: Calculate squared differences (variance components)
+    ExpDiff_val = (val - M_val)^2, 
+    ExpDiff_ars = (ars - M_ars)^2, 
+    
+    # Step 4: Arousal-weighted calculations
+    W_Mean_val = sum(val * ars, na.rm = TRUE) / sum(ars, na.rm = TRUE),
+    ExpDiff_wval = (val - W_Mean_val)^2,
+    Arousal_weighted_diff_val = ars * ExpDiff_wval
+  ) |> 
+  # Second Step 
+  reframe(
+    # Count the number of valid (non-NA) ratings for each variable
+    n_valid_val = sum(!is.na(val)),
+    n_valid_ars = sum(!is.na(ars)),
+
+    # Calculate Spread Score for Valence/Arousal Ratings (conditional)
+    spread_val = ifelse(n_valid_val >= 2, sqrt(mean(ExpDiff_val, na.rm = TRUE)), NA), 
+
+    # Calculate Weighted Spread Score (Valence)
+    wspread_val = ifelse(n_valid_val >= 2, sqrt(sum(Arousal_weighted_diff_val, na.rm = TRUE) / n_valid_val), NA), 
+
+    # Keep all other columns as they are 
+    M_val = first(M_val),
+    M_ars = first(M_ars), 
+    val = val-1, 
+    ars = ars-1, 
+    party = party
+  ) %>% 
+  ungroup() |> 
+
+  # Retain Ratings for individual parties
+  pivot_wider(names_from = "party", 
+              values_from = c(val, ars))
+```
+
+```{r}
+# join it back with the original data
+pol_sel <- pol_clean |> 
+  mutate(affpol_raw = standardize(spread_val), 
+         affpol_weighted = standardize(wspread_val)) |> 
+  select(id,
+         affpol_raw,
+         affpol_weighted) 
+
+survey_data <- survey_data |> 
+  left_join(pol_sel, by = "id")
+```
+
+##### Bipartisan Support and Social Polarization
+
+Bipartisan Support: Mean of bipartisanship_01 and bipartisanship_02 (0-100 scale). 
+
+Social Polarization: Variance-based measure of friendship comfort differences, calculated as sum of squared deviations from mean.
+
+```{r}
+# Bipartisan support 
+survey_data <- survey_data |>
+  mutate(
+    bipartisan_support_raw = (bipartisanship_01 + bipartisanship_02) / 2,
+    bipartisan_support = standardize(bipartisan_support_raw)
+  )
+
+# Social polarization (variance-based measure)
+survey_data <- survey_data |>
+  mutate(
+    social_polarization_raw = (friends_democrats - friends_republicans)^2 / 2,
+    social_polarization = standardize(social_polarization_raw)
+  )
+```
+
+##### Democratic Support
+
+Democratic Support: 7 items (dem_01 to dem_07, 1-5 Likert). 
+Reverse code: dem_01, dem_02, dem_03, dem_05, dem_06, dem_07 (anti-democratic items). dem_04 not reversed (pro-democratic). Range: 7-35.
+
+```{r}
+# Reverse code anti-democratic items
+survey_data <- survey_data |>
+  mutate(
+    dem_01_r = 6 - dem_01,  # Reverse 1-5 scale
+    dem_02_r = 6 - dem_02,
+    dem_03_r = 6 - dem_03,
+    dem_05_r = 6 - dem_05,
+    dem_06_r = 6 - dem_06,
+    dem_07_r = 6 - dem_07
+  )
+
+# Calculate raw sum score
+survey_data <- survey_data |>
+  mutate(
+    democratic_support_raw = dem_01_r + dem_02_r + dem_03_r + dem_04 + 
+                             dem_05_r + dem_06_r + dem_07_r
+  )
+
+survey_data <- survey_data |>
+  mutate(
+    democratic_support = standardize(democratic_support_raw)
+  )
+```
+
+```{r}
+democratic_omega <- survey_data |>
+  select(dem_01_r, dem_02_r, dem_03_r, dem_04, dem_05_r, dem_06_r, dem_07_r) |> 
+  ci.reliability(
+    data = _,
+    type = "omega",
+    interval.type = "mlr",
+    conf.level = 0.95)
+
+democratic_omega
+```
+
+##### Vote Importance 
+
+```{r}
+survey_data <- survey_data |>
+  mutate(
+    vote_importance_raw = vote_importance,  # keep raw variable
+    vote_importance = standardize(vote_importance_raw)
+  ) 
+survey_data |> 
+  select(vote_importance_raw, vote_importance) |> 
+  datasummary_skim()
+```
+
+##### Party Identity Strength
+
+```{r}
+survey_data <- survey_data |>
+  mutate(
+    party_identity_strength_raw = party_identity_strength,  # keep raw variable
+    party_identity_strength = standardize(party_identity_strength_raw)
+  ) 
+
+survey_data |> 
+  select(party_identity_strength_raw, party_identity_strength) |> 
+  datasummary_skim()
+```
+
+##### Political Engagement
+
+Political Engagement Scale: 3 items (political_interest 1-5, political_discussion 1-4, political_follow 1-4). Reverse code: political_discussion, political_follow. Range: 3-13.
+
+```{r}
+# Reverse code items
+survey_data <- survey_data |>
+  mutate(
+    political_discussion_r = 5 - political_discussion,  # Reverse 1-4 scale
+    political_follow_r = 5 - political_follow           # Reverse 1-4 scale
+  )
+
+# Calculate sum score
+survey_data <- survey_data |>
+  mutate(
+    political_engagement_raw = political_interest + 
+                               political_discussion_r + 
+                               political_follow_r,
+    political_engagement = standardize(political_engagement_raw)
+  )
+```
+
+```{r}
+engagement_omega <- survey_data |> 
+  select(political_interest, political_discussion_r, political_follow_r) |> 
+  ci.reliability(data = _,
+                 type = "omega",
+                 interval.type = "mlr",
+                 conf.level = 0.95)
+
+engagement_omega
+```
+
+##### General Health
+
+```{r}
+survey_data <- survey_data |>
+  mutate(
+    health_general_raw = health_general,  # keep raw variable
+    health_general = standardize(health_general_raw)
+  ) 
+
+survey_data |> 
+  select(health_general_raw, health_general) |> 
+  datasummary_skim()
+```
+
+##### Health and Politics
+
+Health-Politics Scale: 10 items (health_politics_01 to health_politics_10, 1-5 Likert). All items negatively worded. Final sum reversed so higher scores indicate better health. Range: 10-50.
+
+```{r}
+# Calculate raw sum score (higher = worse health)
+survey_data <- survey_data |>
+  mutate(
+    health_politics_raw_unreversed = health_politics_01 + health_politics_02 + 
+                                     health_politics_03 + health_politics_04 + 
+                                     health_politics_05 + health_politics_06 + 
+                                     health_politics_07 + health_politics_08 + 
+                                     health_politics_09 + health_politics_10
+  )
+
+# Reverse the sum so higher = better health
+# Min=10, Max=50, so reverse: 60 - sum
+survey_data <- survey_data |>
+  mutate(
+    health_politics_raw = 60 - health_politics_raw_unreversed,
+    health_politics = standardize(health_politics_raw)
+  )
+```
+
+```{r}
+health_politics_omega <- survey_data |>
+  select(health_politics_01:health_politics_10) |> 
+  ci.reliability(
+    data = _,
+    type = "omega",
+    interval.type = "mlr",
+    conf.level = 0.95)
+
+health_politics_omega 
+```
+
+##### PSS-10
+
+Perceived Stress Scale (PSS-10): 10 items (PSS_01 to PSS_10, 0-4 scale). Reverse code: PSS_04, PSS_05, PSS_07, PSS_08 (positively worded items). Higher scores indicate greater stress. Range: 0-40.
+
+```{r}
+# Reverse code positively worded items
+survey_data <- survey_data |>
+  mutate(
+    PSS_04_r = 4 - PSS_04,  # Reverse 0-4 scale
+    PSS_05_r = 4 - PSS_05,
+    PSS_07_r = 4 - PSS_07,
+    PSS_08_r = 4 - PSS_08
+  )
+
+# Calculate raw sum score
+survey_data <- survey_data |>
+  mutate(
+    stress_general_raw = PSS_01 + PSS_02 + PSS_03 + PSS_04_r + PSS_05_r + 
+                         PSS_06 + PSS_07_r + PSS_08_r + PSS_09 + PSS_10,
+    stress_general = standardize(stress_general_raw)
+  )
+```
+
+```{r}
+stress_general_omega <- survey_data |>
+  select(PSS_01, PSS_02, PSS_03, PSS_04_r, PSS_05_r, 
+         PSS_06, PSS_07_r, PSS_08_r, PSS_09, PSS_10) |> 
+  ci.reliability(
+    data = _,
+    type = "omega",
+    interval.type = "mlr",
+    conf.level = 0.95)
+
+stress_general_omega
+```
+
+##### Political Stress
+
+```{r}
+survey_data <- survey_data |>
+  mutate(
+    stress_politics_raw = stress_politics,  # keep raw variable
+    stress_politics = standardize(stress_politics_raw)
+  ) 
+
+survey_data |> 
+  select(stress_politics_raw, stress_politics) |> 
+  datasummary_skim()
+```
+
+##### Depression
+
+Depression Scale (PHQ-8): 8 items (depression_01 to depression_08, 0-3 scale). All items are depression symptoms. Higher scores indicate greater depression. Range: 0-24.
+
+```{r}
+# Calculate raw sum score
+survey_data <- survey_data |>
+  mutate(
+    depression_raw = depression_01 + depression_02 + depression_03 + depression_04 + 
+                     depression_05 + depression_06 + depression_07 + depression_08,
+    depression = standardize(depression_raw)
+  )
+```
+
+```{r}
+depression_omega <- survey_data |>
+  select(depression_01:depression_08) |> 
+  ci.reliability(
+    data = _,
+    type = "omega",
+    interval.type = "mlr",
+    conf.level = 0.95)
+
+depression_omega
+```
+
+##### Selected survey data
+
+```{r}
+# for descriptives (re-order)
+survey_data_fin <- survey_data |> 
+  select(PROLIFIC_PID, id, PID, 
+         date, timer_total,
+         commitment,
+         attention_01, attention_02,
+         manip_check_01:party_closer,
+         party_identity_strength_raw, party_identity_strength,
+         party_preference, party_intensity,
+         valence_democrats:arousal_republicans,
+         affpol_raw, affpol_weighted,
+         bipartisan_support, social_polarization,
+         ideology, 
+         democratic_support_raw, democratic_support,
+         vote_election, vote_importance_raw, vote_importance,
+         political_engagement_raw, political_engagement,
+         health_general_raw, health_general, 
+         health_politics_raw, health_politics,
+         stress_general_raw, stress_general,
+         stress_politics_raw, stress_politics,
+         depression_raw, depression,
+         age:income,
+         bipartisanship_01, bipartisanship_02, 
+         friends_democrats, friends_republicans,
+         dem_01:dem_07, dem_01_r:dem_07_r,
+         political_interest:political_follow,
+         political_discussion_r, political_follow_r,
+         health_politics_01:health_politics_10,
+         PSS_01:PSS_10, PSS_04_r:PSS_08_r,
+         depression_01:depression_08,
+         max_boxes:hard95,
+         work_total:work_voterural,
+         work_ingroup, work_outgroup, work_difference,
+         )
+```
+
+```{r}
+# for merging
+survey_selection <- survey_data_fin |> 
+  select(PROLIFIC_PID, 
+         PID:depression_08,
+         work_total:work_difference)
+```
+
+### Create combined dataframe
+
+```{r}
+combined_data <- task_data |> 
+  left_join(survey_selection, by = "PID")
+```
+
+Create in-group / out-group coding
+
+If agent == VOTEALL --> benefit = "EVERYONE"
+If agent == VOTEURBAN and party | party_closer == Democrat --> benefit = "INGROUP"
+If agent == VOTERURAL and party | party_closer == Democrat --> benefit = "OUTGROUP"
+If agent == VOTERURAL and party | party_closer == Republican --> benefit = "OUTGROUP"
+If agent == VOTEURBAN and party | party_closer == Republican --> benefit = "INGROUP"
+
+```{r}
+combined_data <- combined_data |>
+  mutate(
+    benefit = case_when(
+      agent == "VOTEALL" ~ "EVERYONE",
+      agent == "VOTEURBAN" & (party == "Democrat" | party_closer == "Democrat") ~ "INGROUP",
+      agent == "VOTERURAL" & (party == "Democrat" | party_closer == "Democrat") ~ "OUTGROUP", 
+      agent == "VOTERURAL" & (party == "Republican" | party_closer == "Republican") ~ "INGROUP",
+      agent == "VOTEURBAN" & (party == "Republican" | party_closer == "Republican") ~ "OUTGROUP",
+      .default = NA_character_
+    )
+  )
+```
+
+Reorder combined data
+
+```{r}
+combined_data <- combined_data |> 
+  select(PROLIFIC_PID, id, PID, date:commitment,
+         agent, benefit, eff:hard95_nboxes,
+         attention_01:work_difference)
+```
+
+## Data exclusion criteria
+
+We will exclude data from participants who meet any of the following criteria:
+
+1. Indicate at the start of the study that they will not pay attention (i.e., select "No, I will not" in response to the attention pledge).
+
+```{r}
+exclusion_01 <- survey_data_fin |>
+  filter(commitment != "Yes, I will") |>
+  select(PROLIFIC_PID, party, age, gender, ethnicity01, education)
+
+# Count and display
+cat("N excluded:", nrow(exclusion_01))
+exclusion_01 
+```
+
+2. Fail at least one of two attention checks embedded in the post-task survey (e.g., "Please select 'Strongly disagree' as your response to this item").
+
+```{r}
+exclusion_02 <- survey_data_fin |>
+  filter(attention_01 == "failed" | attention_02 == "failed") |>
+  select(PROLIFIC_PID, party, age, gender, ethnicity01, education, 
+         attention_01, attention_02)
+
+cat("N excluded:", nrow(exclusion_02))
+exclusion_02
+```
+
+3. Missed more than half of the trials (>13 of 27) in the pro-democratic effort task (i.e., no response within the time limit)
+
+```{r}
+exclusion_03 <- combined_data |>
+  group_by(PROLIFIC_PID) |>
+  summarise(
+    n_missed = sum(is.na(decision)),
+    n_total = n(),
+    .groups = "drop"
+  ) |>
+  filter(n_missed > 13) |>
+  left_join(
+    survey_data_fin |> 
+      select(PROLIFIC_PID, party, age, gender, ethnicity01, education),
+    by = "PROLIFIC_PID"
+  ) |>
+  select(PROLIFIC_PID, n_missed, n_total, party, age, gender, ethnicity01, education)
+
+# Count and display
+cat("N excluded:", nrow(exclusion_03))
+exclusion_03 
+```
+
+4. Identify as Independent in our survey measures. We recruit only Democrats and Republicans via Prolific's pre-screening filters. However, occasionally some Independents may still be included in the sample due to discrepancies in Prolific's demographic data. As our main analyses focus on Democrats and Republicans, we will exclude these participants.
+
+```{r}
+exclusion_04 <- survey_data_fin |>
+  filter(party %in% c("Independent", "Other")) |>
+  select(PROLIFIC_PID, party, age, gender, ethnicity01, education)
+
+cat("N excluded:", nrow(exclusion_04))
+exclusion_04
+```
+
+5. Do not reach the end of the study (i.e., complete the effort task but do not complete the survey measures)
+
+(already excluded by default)
+
+### Overview
+
+```{r}
+# Sequential exclusion counting (non-overlapping)
+excluded_pids <- character(0)
+
+# List of exclusions with labels
+exclusions_list <- list(
+  "No attention pledge" = exclusion_01,
+  "Failed attention check" = exclusion_02,
+  "Missed >13 trials" = exclusion_03,
+  "Independent/Other party" = exclusion_04
+)
+
+# Count additional exclusions at each step
+exclusion_summary <- map_dfr(names(exclusions_list), function(reason) {
+  df <- exclusions_list[[reason]]
+  
+  # For duplicates, count unique PIDs only
+  if (reason == "Duplicate entries") {
+    unique_pids <- unique(df$PROLIFIC_PID)
+    new_exclusions <- setdiff(unique_pids, excluded_pids)
+  } else {
+    new_exclusions <- setdiff(df$PROLIFIC_PID, excluded_pids)
+  }
+  
+  # Update cumulative excluded list
+  excluded_pids <<- c(excluded_pids, new_exclusions)
+  
+  tibble(
+    exclusion_reason = reason,
+    n_additional = length(new_exclusions)
+  )
+})
+
+# Add starting N and final N
+exclusion_summary <- exclusion_summary |>
+  add_row(exclusion_reason = "Starting N", n_additional = nrow(survey_data_fin), .before = 1) |>
+  mutate(n_remaining = nrow(survey_data_fin) - cumsum(replace(n_additional, 1, 0)))
+
+# Display
+cat("\nSequential Exclusion Summary\n")
+exclusion_summary |> tt()
+cat("\nFinal N after all exclusions:", tail(exclusion_summary$n_remaining, 1), "\n")
+```
+
+### Exclude participants
+
+```{r}
+# Collect all Prolific IDs to exclude (exclusions 01-04)
+pids_to_exclude <- bind_rows(
+  exclusion_01 |> select(PROLIFIC_PID),
+  exclusion_02 |> select(PROLIFIC_PID),
+  exclusion_03 |> select(PROLIFIC_PID),
+  exclusion_04 |> select(PROLIFIC_PID)
+) |>
+  distinct(PROLIFIC_PID) |>
+  pull(PROLIFIC_PID)
+
+# Apply exclusions to survey data
+survey_data_exc <- survey_data_fin |>
+  filter(!PROLIFIC_PID %in% pids_to_exclude)
+
+# Apply exclusions to combined data
+combined_data_exc <- combined_data |>
+  filter(!PROLIFIC_PID %in% pids_to_exclude)
+```
+
+## Save cleaned data for modelling
+
+```{r}
+# survey data, all cases (for bonus payment)
+write_csv(survey_data_fin, here(data_clean_dir, "demeffort_bonus_data.csv"))
+save(survey_data_fin, file = here(data_clean_dir, "demeffort_bonus_data.RData"))
+
+# survey data, analysis data
+write_csv(survey_data_exc, here(data_clean_dir, "demeffort_survey_data.csv"))
+save(survey_data_exc, file = here(data_clean_dir, "demeffort_survey_data.RData"))
+
+# combined data (for computational and regression models)
+write_csv(combined_data_exc, here(data_clean_dir, "demeffort_combined_data.csv"))
+save(combined_data_exc, file = here(data_clean_dir, "demeffort_combined_data.RData"))
+```
+
+
+

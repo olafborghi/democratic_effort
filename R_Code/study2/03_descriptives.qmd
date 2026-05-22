@@ -1,0 +1,1402 @@
+---
+title: "Democratic Effort Study 2: Descriptives"
+format:
+  html:
+    theme: paper
+    code-tools: true
+    code-fold: true
+    toc: true
+    toc-fold: false
+    toc-location: right
+    toc-depth: 3
+    toc-title: "Contents"
+embed-resources: true
+warning: false
+---
+
+```{r}
+#| include: false
+# set error messages to English
+Sys.setenv(LANG = "en")
+
+knitr::opts_chunk$set(
+  fig.align = "center", 
+  fig.retina = 3,
+  fig.width = 6, 
+  fig.height = (6 * 0.618),
+  out.width = "90%", 
+  collapse = FALSE
+)
+
+options(
+  digits = 4,
+  width = 300,
+  dplyr.summarise.inform = FALSE)
+```
+
+```{r}
+#| include: false
+#| warning: true
+#| message: true
+if (!require("groundhog", quietly = TRUE)) {
+  install.packages("groundhog")
+}
+library("groundhog")
+
+# use groundhog to install and load packages
+pkgs <- c("here",         # System path management
+          "datawizard",   # Data cleaning & standardization
+          "tidyverse",    # ggplot, dplyr, and friends
+          "modelsummary", # Data and model summaries with tables and plots
+          "tinytable",    # Lightweight package to create tables
+          "effectsize",   # Effect sizes for common tests
+          "GGally",       # ggpairs and other ggplot2 friends
+          "ggdist",       # Additional plot elements
+          "corrplot",     # Visualise correlations
+          "ggrain",       # For fancy raincloud plots
+          "ggsignif",     # Add significance to plots
+          "patchwork",    # Combine plots
+          "showtext"      # Additional fonts for plots etc
+          )
+
+
+groundhog.library(pkgs, "2026-01-01")
+```
+
+```{r}
+#| include: false
+
+showtext_auto()
+showtext_opts(dpi = 600)
+
+font_add_google("Public Sans", "Public Sans")
+font_add_google("Public Sans", "Public Sans Light", regular.wt = 300)
+font_add_google("Public Sans", "Public Sans Semibold", regular.wt = 600)
+
+# Custom ggplot theme
+theme_nice <- function(base_size = 14) {
+  # General text family and base size
+  theme_minimal(base_family = "Public Sans", base_size = base_size) +
+    theme(
+      # Remove minor grid lines for cleaner look
+      panel.grid.minor = element_blank(),
+      # Customize major grid lines color
+      panel.grid.major = element_blank(),
+      # Plot title: bold and custom relative size
+      plot.title = element_text(family = "Public Sans", face = "bold", size = rel(1.1), margin = margin(b = 10)),
+      # Subtitle and caption: lighter weight 
+      plot.subtitle = element_text(family = "Public Sans Light", face = "plain"),
+      plot.caption = element_text(family = "Public Sans Light", face = "plain"),
+      # Axis text: Relative size
+      axis.text = element_text(size = rel(0.9)),
+      # Axis titles: Semibold and custom relative size
+      axis.title = element_text(family = "Public Sans Semibold", size = rel(0.9)),
+      axis.title.x = element_text(hjust = 0.5),
+      axis.title.y = element_text(hjust = 0.5),
+      # Axis lines
+      axis.line = element_line(color = "grey25", linewidth = 0.8),
+      # Facet labels: bold text on grey background
+      strip.text = element_text(
+        family = "Public Sans Semibold", face = "plain",
+        size = rel(1),
+        hjust = 0.5
+      ),
+      strip.background = element_rect(fill = "grey95", color = "grey25", linewidth = 0.8), 
+      # Legend styling: compact and top-positioned
+      legend.title = element_text(family = "Public Sans Semibold", size = rel(0.8)),
+      legend.text = element_text(size = rel(0.8)),
+      legend.position = "top",
+      legend.justification = "center",
+      legend.title.position = "left",
+      legend.margin = margin(l = 0, t = 0)
+    )
+}
+
+theme_set(theme_nice())
+update_geom_defaults("text", list(family = "Public Sans"))
+update_geom_defaults("label", list(family = "Public Sans"))
+
+agent_limits <- c("VOTERURAL", "VOTEURBAN")
+agent_colors <- c("VOTERURAL" = "firebrick3", "VOTEURBAN" = "slateblue4")  
+agent_fills <- c("VOTERURAL" = "firebrick3", "VOTEURBAN" = "slateblue4")   
+agent_lines <- c("VOTERURAL" = "dashed", "VOTEURBAN" = "dashed")
+
+party_colors <- c("Democrat" = "slateblue4", "Republican" = "firebrick3")
+party_fills  <- c("Democrat" = "slateblue4", "Republican" = "firebrick3")
+
+benefit_limits_lab <- c("In-Group",  "Out-Group")
+benefit_colors_lab <- c("In-Group" = "#009988", "Out-Group" = "#EE7733") 
+benefit_fills_lab <- c("In-Group" = "#009988", "Out-Group" = "#EE7733")
+benefit_lines_lab <- c("In-Group" = "dashed", "Out-Group" = "dashed")
+```
+
+```{r}
+#| include: false
+data_dir <- here("01_data", "final") 
+table_dir <- here("02_output", "tables", "descriptives") 
+fig_dir <- here("02_output", "figures", "descriptives") 
+
+dir.create(table_dir, recursive = TRUE, showWarnings = TRUE)
+dir.create(fig_dir, recursive = TRUE, showWarnings = TRUE)
+```
+
+```{r}
+load(here(data_dir, "demeffort_survey_data.RData")) 
+load(here(data_dir, "demeffort_combined_data.RData"))
+```
+
+## Participant descriptives
+
+```{r}
+descriptive_table <- survey_data |>
+  mutate(across(where(is.factor), droplevels)) |>
+  select(
+    Age = age,
+    Gender = gender,
+    Party = party,
+    "Rural / Urban" = rururb01,
+    Education = education,
+    "Primary Ethnicity" = ethnicity01,
+    Income = income
+  ) |>
+  datasummary_skim(
+    type = "all",
+    fun_numeric = list(
+      Mean   = Mean,
+      SD     = SD,
+      Min    = Min,
+      Median = Median,
+      Max    = Max
+    )
+  ) |>
+  style_tt(j = 1, align = "l") |>
+  style_tt(j = 2:3, align = "c")
+
+descriptive_table |> 
+  save_tt(here(table_dir, "sample_descriptives.docx"), overwrite = T)
+
+descriptive_table
+```
+
+```{r}
+options(modelsummary_balance_fn = list(Mean = Mean, SD = SD, Min = Min, Median = Median, Max = Max))
+
+descriptive_party_table <- survey_data |>
+  mutate(across(where(is.factor), droplevels)) |>
+  select(
+    Age = age,
+    Gender = gender,
+    "Rural / Urban" = rururb01,
+    Education = education,
+    "Primary Ethnicity" = ethnicity01,
+    Income = income,
+    Party = party
+  ) |>
+  datasummary_balance(~Party, data = _) |>
+  style_tt(j = 1, align = "l") |>
+  style_tt(j = 2:3, align = "c")
+
+descriptive_party_table |>
+  save_tt(here(table_dir, "by_party_sample_descriptives.docx"), overwrite = TRUE)
+descriptive_party_table
+```
+
+```{r}
+descriptive_exp_table <- survey_data |>  
+  select(
+    Condition = condition,
+    Age = age,
+    Gender = gender,
+    "Rural / Urban" = rururb01,
+    Education = education,
+    "Primary Ethnicity" = ethnicity01,
+    Income = income,
+    Party = party
+  ) |> 
+  droplevels() |> 
+  datasummary_balance(~Condition, data = _, dinm = FALSE) |> 
+  style_tt(j = 1, align = "l") |> 
+  style_tt(j = 2:3, align = "c")
+
+descriptive_exp_table |> 
+  save_tt(here(table_dir, "by_condition_sample_descriptives.docx"), overwrite = T)
+
+descriptive_exp_table
+```
+
+## Variable Descriptives
+
+```{r}
+survey_data |>  
+  mutate(Duration = as.numeric(timer_total) / 60) |> 
+  select(Duration) |> 
+  datasummary_skim() |> 
+  style_tt(j = 1, align = "l") |> 
+  style_tt(j = 2:3, align = "c")
+```
+
+```{r}
+variable_table <- survey_data |>
+  select(
+    "K In-group"               = k_ingroup,
+    "K Out-group"              = k_outgroup,
+    "K Rural"                  = k_rural,
+    "K Urban"                  = k_urban,
+    "K Out-group − In-group"   = k_outgroup_ingroup,
+    "K Mean"                   = k_mean,
+    "β (Inverse Temperature)"  = beta,
+    "Deviation"                = deviation,
+    "Affective Polarization"   = affpol_weighted,
+    "Party Importance"         = party_importance_raw,
+    "Democratic Support"       = democratic_support_raw,
+    "Free & Fair Elections"    = freefair_raw
+  ) |>
+  datasummary_skim(
+    type = "numeric",
+    fun_numeric = list(
+      Mean   = Mean,
+      SD     = SD,
+      Min    = Min,
+      Median = Median,
+      Max    = Max
+    )
+  ) |>
+  style_tt(j = 1, align = "l") |>
+  style_tt(j = 2:3, align = "c")
+
+variable_table |>
+  save_tt(here(table_dir, "variable_descriptives.docx"), overwrite = TRUE)
+variable_table
+```
+
+```{r}
+variable_party_table <- survey_data |>  
+  select(
+    Party                      = party_preference,
+    "K In-group"               = k_ingroup,
+    "K Out-group"              = k_outgroup,
+    "K Rural"                  = k_rural,
+    "K Urban"                  = k_urban,
+    "K Out-group − In-group"   = k_outgroup_ingroup,
+    "K Mean"                   = k_mean,
+    "β (Inverse Temperature)"  = beta,
+    Deviation                  = deviation,
+    "Affective Polarization"   = affpol_weighted,
+    "Party Importance"         = party_importance_raw,
+    "Democratic Support"       = democratic_support_raw,
+    "Free & Fair Elections"    = freefair_raw
+  ) |> 
+  droplevels() |> 
+  datasummary_balance(~Party, data = _) |> 
+  style_tt(j = 1, align = "l") |> 
+  style_tt(j = 2:3, align = "c")
+
+variable_party_table |> 
+  save_tt(here(table_dir, "variable_party_descriptives.docx"), overwrite = TRUE)
+variable_party_table
+```
+
+```{r}
+variable_exp_table <- survey_data |>  
+  select(
+    Condition                  = condition,
+    "K In-group"               = k_ingroup,
+    "K Out-group"              = k_outgroup,
+    "K Rural"                  = k_rural,
+    "K Urban"                  = k_urban,
+    "K Out-group − In-group"   = k_outgroup_ingroup,
+    "K Mean"                   = k_mean,
+    "β (Inverse Temperature)"  = beta,
+    Deviation                  = deviation,
+    "Affective Polarization"   = affpol_weighted,
+    "Party Importance"         = party_importance_raw,
+    "Democratic Support"       = democratic_support_raw,
+    "Free & Fair Elections"    = freefair_raw
+  ) |> 
+  droplevels() |> 
+  datasummary_balance(~Condition, data = _) |> 
+  style_tt(j = 1, align = "l") |> 
+  style_tt(j = 2:3, align = "c")
+
+variable_exp_table |> 
+  save_tt(here(table_dir, "variable_condition_descriptives.docx"), overwrite = TRUE)
+variable_exp_table
+```
+
+## Balance Tables
+
+### Benefit In-Group / Out-Group / Everyone
+
+```{r}
+benefit_balance_table <- combined_data |> 
+  select(decision, 
+         benefit) |> 
+  mutate(
+    Decision = case_match(
+      decision,
+      1 ~ "Work",
+      0 ~ "Rest",
+      NA ~ "NaN"),
+    Condition = case_match(
+      benefit, 
+      "INGROUP" ~ "In-Group",
+      "OUTGROUP" ~ "Out-Group"
+    )
+  ) |> 
+  mutate(Condition = factor(Condition, levels = c("In-Group", "Out-Group"))) |> 
+  datasummary_crosstab(Condition ~ Decision, 
+                       data = _)
+
+benefit_balance_table |> 
+  save_tt(here(table_dir, "benefit_balance_table.docx"), overwrite = T)
+
+benefit_balance_table
+```
+
+### Within Factor 2: Effort
+
+```{r}
+combined_data |> 
+  mutate(
+    Decision = case_match(
+      decision,
+      1 ~ "Work",
+      0 ~ "Rest",
+      NA ~ "NaN"
+    ),
+    Condition = factor(
+      case_match(
+        eff, 
+        "easy65" ~ "Low Effort",
+        "hard80" ~ "Mid Effort",
+        "hard95" ~ "High Effort"
+      ),
+      levels = c("Low Effort", "Mid Effort", "High Effort")
+    )
+  ) |> 
+  datasummary_crosstab(
+    Condition ~ Decision, 
+    data = _
+  )
+```
+
+### Follow-Up Agent x Partisanship
+
+```{r}
+agent_balance_table <- combined_data |> 
+  select(decision, 
+         agent,
+         party) |> 
+  droplevels() |> 
+  mutate(
+    Decision = case_match(
+      decision,
+      1 ~ "Work",
+      0 ~ "Rest",
+      NA ~ "NaN"),
+    Condition = case_match(
+      agent, 
+      "VOTERURAL" ~ "Rural",
+      "VOTEURBAN" ~ "Urban"
+    )
+  ) |> 
+  mutate(Condition = factor(Condition, levels = c("Urban", "Rural"))) |> 
+  datasummary_crosstab(Decision ~ Condition * party, 
+                       statistic = ~ Percent("col"),
+                       data = _)
+
+agent_balance_table |> 
+  save_tt(here(table_dir, "agent_balance_table.docx"), overwrite = T)
+
+agent_balance_table
+```
+
+### Follow-Up Condition x Benefit
+
+```{r}
+treatment_balance_table <- combined_data |> 
+  select(decision, 
+         benefit,
+         Correction = condition) |> 
+  droplevels() |> 
+  mutate(
+    Decision = case_match(
+      decision,
+      1 ~ "Work",
+      0 ~ "Rest",
+      NA ~ "NaN"),
+    Benefit = case_match(
+      benefit, 
+      "INGROUP" ~ "In-Group",
+      "OUTGROUP" ~ "Out-Group"
+    )
+  ) |> 
+  mutate(Benefit = factor(Benefit, levels = c("In-Group", "Out-Group"))) |>  
+  datasummary_crosstab(Decision ~ Correction * Benefit, 
+                       statistic = ~ Percent("col"),
+                       data = _)
+
+treatment_balance_table |> 
+  save_tt(here(table_dir, "treatment_balance_table.docx"), overwrite = T)
+
+treatment_balance_table
+```
+
+## Correlations
+
+```{r}
+#| message: false
+#| fig-width: 10
+#| fig-height: 9
+#| fig-dpi: 600
+scatter_function <- function(data, mapping, ...) {
+  ggplot(data = data, mapping = mapping) +
+    geom_point(alpha = 0.2, size = 1, color = "#fd8d3c") +
+    geom_smooth(method = "lm",
+                se = TRUE,
+                linewidth = 1.2,
+                alpha = 0.15,
+                color = "black",
+                fill = "black",
+                na.rm = TRUE)
+}
+
+corr_plot <- survey_data |>
+  select(
+    "K Out−In"  = k_outgroup_ingroup,
+    "K Mean"    = k_mean,
+    "Beta"      = beta,
+    "Deviation" = deviation,
+    "AffPol."   = affpol_weighted,
+    "PartImp"   = party_importance_raw,
+    "DemSupp"   = democratic_support_raw,
+    "FreeFair"  = freefair_raw
+  ) |>
+  ggpairs(
+    lower = list(continuous = scatter_function),
+    upper = list(continuous = wrap("cor", stars = TRUE, size = 5)),
+    diag  = list(continuous = wrap("densityDiag", alpha = 0.5,
+                                   fill = "#fd8d3c", color = "#f16913")),
+    progress = FALSE
+  ) +
+  theme_nice() +
+  theme(
+    axis.text  = element_text(size = 10),
+    strip.text = element_text(size = 11)
+  )
+
+corr_plot
+
+ggsave(
+  here(fig_dir, "variable_correlogram.png"),
+  height = 9,
+  width  = 10,
+  dpi    = 600
+)
+```
+
+
+## In-Group / Out-Group Figures
+
+### Regression Plot
+
+```{r}
+p_dat <- combined_data |> 
+  filter(!is.na(decision)) |>
+    mutate(
+    effort_num = case_when(
+      eff == "easy65" ~ 1,
+      eff == "hard80" ~ 2, 
+      eff == "hard95" ~ 3),
+    reward_num = as.numeric(as.character(rew)),
+    benefit_label = factor(benefit,
+                           levels = c("INGROUP", "OUTGROUP"),
+                           labels = c("In-Group", "Out-Group")))
+```
+
+```{r}
+p_effort_reg <- p_dat |>
+  ggplot(aes(x = effort_num, y = decision, 
+             color = benefit_label, fill = benefit_label, linetype = benefit_label)) +
+  stat_smooth(alpha = 0.3, linewidth = 1.4, method = "glm", method.args = list(family = "binomial")) +
+  stat_smooth(alpha = 0, linewidth = 1.4, method = "glm", method.args = list(family = "binomial")) +
+  scale_fill_manual(limits = benefit_limits_lab, values = benefit_fills_lab) +
+  scale_color_manual(limits = benefit_limits_lab, values = benefit_colors_lab) +
+  scale_linetype_manual(limits = benefit_limits_lab, values = benefit_lines_lab) +
+  scale_x_continuous(
+    breaks = c(1, 2, 3),
+    labels = c("1", "2", "3"),
+    expand = expansion(mult = c(0.2, 0.2))
+  ) +
+  scale_y_continuous(
+    breaks = seq(0, 1.0, by = 0.25),
+    limits = c(0, 1)
+  ) +
+  theme_nice() +
+  labs(x = "Effort Level", 
+       y = "Choices to Work") +
+  theme(legend.position = "bottom")
+```
+
+```{r}
+p_reward_reg <- p_dat |>
+  ggplot(aes(x = reward_num, y = decision, 
+             color = benefit_label, fill = benefit_label, linetype = benefit_label)) +
+  stat_smooth(alpha = 0.3, linewidth = 1.4, method = "glm", method.args = list(family = "binomial")) +
+  stat_smooth(alpha = 0, linewidth = 1.4, method = "glm", method.args = list(family = "binomial")) +
+  scale_fill_manual(limits = benefit_limits_lab, values = benefit_fills_lab) +
+  scale_color_manual(limits = benefit_limits_lab, values = benefit_colors_lab) +
+  scale_linetype_manual(limits = benefit_limits_lab, values = benefit_lines_lab) +
+  scale_x_continuous(
+    breaks = c(4, 12, 20),
+    labels = c("4", "12", "20"),
+    expand = expansion(mult = c(0.2, 0.2))
+  ) +
+  scale_y_continuous(
+    breaks = seq(0, 1.0, by = 0.25),
+    limits = c(0, 1)
+  ) +
+  theme_nice() +
+  labs(x = "Reward Available", 
+       y = "Choices to Work") +
+  theme(legend.position = "bottom")
+```
+
+```{r}
+#| fig-width: 5
+#| fig-height: 6
+#| fig-dpi: 600
+showtext_opts(dpi = 600)
+
+fig_work_reg <- ((p_effort_reg / p_reward_reg) ) +
+  plot_layout(guides = "collect") +
+  plot_annotation(title = "Study 1") &
+  theme(legend.title = element_blank())
+
+fig_work_reg
+
+ggsave(here(fig_dir, "fig_work_reg.png"),
+       width = 5, height = 6, dpi = 600)
+```
+
+### K Plot
+
+```{r}
+dev_data <- survey_data |>
+  filter(deviation < 0) |>
+  mutate(condition = factor(condition, levels = c("Treatment", "Control")))
+
+t_ingroup   <- t.test(k_ingroup  ~ condition, data = dev_data)
+t_outgroup  <- t.test(k_outgroup ~ condition, data = dev_data)
+t_ctrl      <- t.test(dev_data$k_ingroup[dev_data$condition == "Control"],
+                      dev_data$k_outgroup[dev_data$condition == "Control"],
+                      paired = TRUE)
+t_treat     <- t.test(dev_data$k_ingroup[dev_data$condition == "Treatment"],
+                      dev_data$k_outgroup[dev_data$condition == "Treatment"],
+                      paired = TRUE)
+
+d_ingroup   <- cohens_d(k_ingroup  ~ condition, data = dev_data)$Cohens_d
+d_outgroup  <- cohens_d(k_outgroup ~ condition, data = dev_data)$Cohens_d
+d_ctrl      <- cohens_d(dev_data$k_ingroup[dev_data$condition == "Control"],
+                        dev_data$k_outgroup[dev_data$condition == "Control"],
+                        paired = TRUE)$Cohens_d
+d_treat     <- cohens_d(dev_data$k_ingroup[dev_data$condition == "Treatment"],
+                        dev_data$k_outgroup[dev_data$condition == "Treatment"],
+                        paired = TRUE)$Cohens_d
+
+signif_df <- tibble(
+  group1     = c(0.65, 1.35, 0.65, 1.65),
+  group2     = c(1.65, 2.35, 1.35, 2.35),
+  p.value    = c(t_ingroup$p.value, t_outgroup$p.value, t_treat$p.value, t_ctrl$p.value),
+  cohens_d   = c(d_ingroup, d_outgroup, d_treat, d_ctrl),
+  y_position = c(2.2, 2.45, 1.75, 1.75)
+) |> 
+  mutate(
+    stars = case_when(
+      p.value < .001 ~ "***",
+      p.value < .01  ~ "**",
+      p.value < .05  ~ "*",
+      TRUE           ~ "ns"
+    ),
+    label = paste0(stars, " (d = ", round(cohens_d, 2), ")")
+  )
+
+dat_k <- dev_data |>
+  select(PID, condition, k_ingroup, k_outgroup) |>
+  pivot_longer(
+    cols      = c(k_ingroup, k_outgroup),
+    names_to  = "benefit",
+    values_to = "k"
+  ) |>
+  mutate(
+    benefit_label = factor(benefit,
+                           levels = c("k_ingroup", "k_outgroup"),
+                           labels = c("In-Group", "Out-Group"))
+  )
+
+dat_k_sum <- dat_k |>
+  summarise(
+    mean_k = mean(k),
+    se_k   = sd(k) / sqrt(n()),
+    .by    = c(condition, benefit_label)
+  )
+```
+
+```{r}
+#| fig-width: 4
+#| fig-height: 3
+#| fig-dpi: 600
+
+p_k <- ggplot() +
+  geom_col(
+    data     = dat_k_sum,
+    aes(x = condition, y = mean_k, fill = benefit_label),
+    position = position_dodge(width = 0.7),
+    color = "black", alpha = 0.9, width = 0.6
+  ) +
+  geom_jitter(
+    data  = dat_k,
+    aes(x = condition, y = k, fill = benefit_label),
+    shape = 21, color = "black",
+    position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.7),
+    alpha = 0.3, size = 0.9
+  ) +
+  geom_errorbar(
+    data  = dat_k_sum,
+    aes(x = condition, ymin = mean_k - se_k, ymax = mean_k + se_k,
+        group = benefit_label),
+    position = position_dodge(width = 0.7),
+    width = 0.15, linewidth = 0.5
+  ) +
+  geom_signif(
+    data       = signif_df,
+    aes(xmin = group1, xmax = group2, annotations = label, y_position = y_position),
+    manual     = TRUE,
+    tip_length = 0,
+    size       = 0.8,
+    textsize   = 3.5,
+    family     = "Public Sans",
+    color      = "black"
+  ) +
+  scale_fill_manual(values = benefit_fills_lab, name = NULL) +
+  scale_y_continuous(
+    limits = c(0, 2.5),
+    expand = expansion(mult = c(0, 0.1))
+  ) +
+  labs(title = "Effort Discounting (K)",
+       x = NULL,
+       y = "Effort Discounting (K)") +
+  theme(legend.position = "none")
+
+ggsave(here(fig_dir, "fig_k.png"), p_k, width = 4, height = 3, dpi = 600)
+```
+
+##### Collapsed across conditions
+
+```{r}
+# Data & tests (collapsed across condition)
+t1_collapsed <- t.test(dev_data$k_ingroup, dev_data$k_outgroup, paired = TRUE)
+d1_collapsed <- cohens_d(dev_data$k_ingroup, dev_data$k_outgroup, paired = TRUE)$Cohens_d
+
+signif_df_collapsed <- tibble(
+  group1     = c("In-Group"),
+  group2     = c("Out-Group"),
+  p.value    = c(t1_collapsed$p.value),
+  cohens_d   = c(d1_collapsed),
+  y_position = c(1.9)
+) |>
+  mutate(
+    stars = case_when(
+      p.value < .001 ~ "***",
+      p.value < .01  ~ "**",
+      p.value < .05  ~ "*",
+      TRUE           ~ "ns"
+    ),
+    label = paste0(stars, " (d = ", round(cohens_d, 2), ")")
+  )
+
+dat_k_collapsed <- dev_data |>
+  select(PID, k_ingroup, k_outgroup) |>
+  pivot_longer(
+    cols      = c(k_ingroup, k_outgroup),
+    names_to  = "benefit",
+    values_to = "k"
+  ) |>
+  mutate(
+    benefit_label = factor(benefit,
+                           levels = c("k_ingroup", "k_outgroup"),
+                           labels = c("In-Group", "Out-Group"))
+  )
+
+dat_k_sum_collapsed <- dat_k_collapsed |>
+  summarise(
+    mean_k = mean(k),
+    se_k   = sd(k) / sqrt(n()),
+    .by    = benefit_label
+  )
+```
+
+```{r}
+#| fig-width: 4
+#| fig-height: 3
+#| fig-dpi: 600
+showtext.opts(dpi = 600)
+p_k_collapsed <- ggplot() +
+  geom_col(
+    data  = dat_k_sum_collapsed,
+    aes(x = benefit_label, y = mean_k, fill = benefit_label),
+    width = 0.6,
+    color = "black", alpha = 0.9
+  ) +
+  geom_jitter(
+    data  = dat_k_collapsed,
+    aes(x = benefit_label, y = k, fill = benefit_label),
+    shape = 21, color = "black",
+    width = 0.1, alpha = 0.3, size = 0.9
+  ) +
+  geom_errorbar(
+    data  = dat_k_sum_collapsed,
+    aes(x = benefit_label, ymin = mean_k - se_k, ymax = mean_k + se_k),
+    width = 0.15, linewidth = 0.5
+  ) +
+  geom_signif(
+    data       = signif_df_collapsed,
+    aes(xmin = group1, xmax = group2, annotations = label, y_position = y_position),
+    manual     = TRUE,
+    tip_length = 0,
+    size       = 0.8,
+    textsize   = 3.5,
+    family     = "Public Sans",
+    color      = "black"
+  ) +
+  scale_fill_manual(values = benefit_fills_lab, name = NULL) +
+  scale_y_continuous(
+    limits = c(0, 2),
+    breaks = seq(0, 2, by = 0.5),
+    expand = expansion(mult = c(0, 0.1))
+  ) +
+  labs(x = NULL,
+       y = "Effort Discounting (K)") +
+  theme(legend.position = "none")
+
+ggsave(here(fig_dir, "fig_k_collapsed.png"), p_k_collapsed, width = 4, height = 3, dpi = 600)
+```
+
+### Combined Regression Plot Figure
+
+```{r}
+#| fig-width: 9
+#| fig-height: 4
+#| fig-dpi: 600
+showtext_opts(dpi = 600)
+
+fig_reg <- wrap_plots(
+    p_effort_reg, p_reward_reg, p_k_collapsed, guide_area(),
+    design  = c(area(1,1), area(1,2), area(1,3), area(2,1,2,3)),
+    widths  = c(1, 1, 1.5),
+    heights = c(10, 1),
+    guides  = "collect"
+  ) +
+  plot_annotation(
+    title = "Study 2",
+    theme = theme(plot.title = element_text(size = 18, face = "bold",
+                                            family = "Public Sans"))
+  ) &
+  theme(legend.title    = element_blank())
+
+fig_reg
+
+ggsave(here(fig_dir, "fig_reg.png"),
+       width = 9, height = 4, dpi = 600)
+```
+
+```{r}
+#| fig-width: 9
+#| fig-height: 5
+#| fig-dpi: 600
+showtext_opts(dpi = 600)
+
+fig_reg_condition <- ((p_effort_reg / p_reward_reg) | p_k) +
+  plot_layout(guides = "collect", widths = c(1, 1.8)) +
+  plot_layout(guides = "collect") +
+  plot_annotation(title = "Study 2") &
+  theme(legend.title = element_blank())
+
+fig_reg_condition
+
+ggsave(here(fig_dir, "fig_reg_condition.png"),
+       width = 9, height = 5, dpi = 600)
+```
+
+## Partisanship Figures
+
+```{r}
+signif_df_fav <- tibble(
+  group1     = "Democrat",
+  group2     = "Republican",
+  label      = "*** (b = -0.30)",
+  y_position = 3
+)
+```
+
+```{r}
+p_fav_partisan <- 
+  survey_data |> 
+  mutate(k_favoritism = standardise(k_outgroup_ingroup, center = 0)) |> 
+  ggplot(
+    aes(x = party, y = k_favoritism, fill = party, color = party)
+  ) +
+  geom_hline(
+    yintercept = 0, linetype = "dashed",
+    color = "grey50", linewidth = 0.4
+  ) +
+  geom_rain(
+    alpha        = 0.4,
+    rain.side    = "f1x1",
+    violin.args  = list(color = "black", alpha = 0.4, width = 0.5),
+    boxplot.args = list(color = "black", outlier.shape = NA, width = 0.1),
+    point.args   = list(shape = 21, color = "black", size = 0.7, alpha = 0.25)
+  ) +
+  geom_signif(
+    data        = signif_df_fav,
+    aes(xmin = group1, xmax = group2,
+        annotations = label, y_position = y_position),
+    manual      = TRUE,
+    tip_length  = 0,
+    size        = 0.8,
+    textsize    = 3.5,
+    family      = "Public Sans",
+    color       = "black",
+    inherit.aes = FALSE
+  ) +
+  scale_fill_manual(values  = party_fills,  name = NULL) +
+  scale_color_manual(values = party_colors, name = NULL) +
+  scale_y_continuous(
+    breaks = seq(-3, 3, by = 1),
+    expand = expansion(mult = c(0.05, 0.1))
+  ) +
+  labs(x = NULL, y = "In-Group Favoritism") +
+  theme(legend.position = "none")
+
+p_fav_partisan
+```
+
+```{r}
+b_val = 0.27
+
+stats_label <- paste0("*** ", "(b = ", b_val, ")")
+
+p_scatter <- survey_data |>
+  select(affpol_weighted, k_outgroup_ingroup) |>
+  mutate(affpol_weighted = as.numeric(affpol_weighted)) |>
+  standardise(select = c("affpol_weighted", "k_outgroup_ingroup")) |>
+  ggplot(aes(x = affpol_weighted, y = k_outgroup_ingroup)) +
+  geom_point(alpha = 0.2, size = 0.8, shape = 21, fill = "grey40") +
+  stat_smooth(
+    method = "lm", formula = y ~ x,
+    colour = "black", fill = "grey60",
+    alpha = 0.15, linewidth = 0.85, se = TRUE
+  ) +
+  annotate(
+    "text",
+    x = -1, y = Inf,
+    hjust = -0.05, vjust = 2.0,
+    label = stats_label,
+    size = 3.5, family = "Public Sans", colour = "grey20"
+  ) +
+
+  # Arrow along x-axis
+  annotate(
+    "segment",
+    x = -1, xend = 2,
+    y = -3.5, yend = -3.5,
+    arrow = arrow(length = unit(0.15, "cm"), type = "closed"),
+    colour = "grey20", linewidth = 0.4
+  ) +
+  # Label centered on the arrow
+  annotate(
+    "text",
+    x = 0.7, y = -3.3,
+    hjust = 0, vjust = 0,
+    label = "More polarized",
+    size = 3, family = "Public Sans", colour = "grey20"
+  ) +
+  
+  coord_cartesian(clip = "off") +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.18))) +
+  labs(
+    x     = "Affective Polarization",
+    y     = "In-Group Favoritism"
+  ) +
+  theme(
+    legend.position = "none",
+    plot.margin = margin(t = 5, r = 10, b = 25, l = 5)  # extra bottom room
+  )
+
+p_scatter
+```
+
+```{r}
+#| fig-width: 7
+#| fig-height: 4
+#| fig-dpi: 600
+showtext_opts(dpi = 600)
+
+fig_affpol <- p_fav_partisan + p_scatter +
+  plot_annotation(
+    title = "Study 2",
+    theme = theme(plot.title = element_text(size = 18, face = "bold",
+                                            family = "Public Sans"))
+  ) &
+  theme(legend.title = element_blank())
+
+
+fig_affpol 
+
+ggsave(here(fig_dir, "fig_affpol.png"),
+       width = 7, height = 4, dpi = 600)
+```
+
+## Treatment Figures
+
+```{r}
+p_misperception_data <- survey_data |>
+  count(condition, deviation) |>
+  group_by(condition) |>
+  mutate(prop = n / sum(n) * 100) |>
+  ungroup()
+
+condition_colors <- c("Control" = "grey90", "Treatment" = "#CC3311")
+
+# Mean deviation (-1.57) mapped to discrete x position:
+# levels are -3,-2,-1,0,1 → positions 1,2,3,4,5
+# so -1.57 → -1.57 - (-3) + 1 = 2.43
+mean_xpos <- 2.43
+
+p_misperception <- ggplot(p_misperception_data, aes(x = factor(deviation), y = prop, fill = condition)) +
+  # Highlight correct answer column
+  annotate("rect",
+           xmin = 3.5, xmax = 4.5, ymin = 0, ymax = Inf,
+           fill = "forestgreen", alpha = 0.07) +
+  geom_col(
+    position = position_dodge(width = 0.75),
+    width = 0.65, alpha = 0.6, color = "black"
+  ) +
+  # Add % over bar
+  geom_text(
+    aes(label = paste0(round(prop, 1), "%")),
+    position = position_dodge(width = 0.75),
+    vjust = -0.4,
+    size = 3,
+    family = "Public Sans",
+    color = "grey20") +
+  # Mean dashed vertical line
+  geom_vline(
+    xintercept = mean_xpos,
+    linetype = "dashed", color = "grey30", linewidth = 0.6
+  ) +
+  # Correct answer label
+  annotate("text",
+           x = 4, y = 50,
+           label = "Correct\nanswer", size = 3.5, color = "grey20",
+           lineheight = 0.9, 
+           family = "Public Sans") +
+  scale_x_discrete(
+    labels = c(
+      "-3" = "Almost\nNever",
+      "-2" = "Rarely",
+      "-1" = "Sometimes",
+       "0" = "Often",
+       "1" = "Almost\nAlways"
+    )
+  ) +
+  scale_y_continuous(
+    expand = expansion(mult = c(0, 0.08)),
+    breaks = seq(0, 50, 10),
+    limits = c(0, 50),
+    labels = function(x) paste0(x, "%")
+  ) +
+  scale_fill_manual(values = condition_colors) +
+  labs(
+    title = "(A) Perceptions of Out-Party Efforts",
+    x = NULL,
+    y = "Participants (%)",
+    fill = NULL
+  ) 
+
+p_misperception
+```
+
+```{r}
+treat_data_raw <- survey_data |>
+  filter(deviation < 0) |>
+  select(condition, k_ingroup, k_outgroup) |>
+  standardise(select = c("k_ingroup", "k_outgroup"), center = 0) |> 
+  mutate(across(c(k_ingroup, k_outgroup), as.numeric)) |>
+  pivot_longer(
+    cols      = c(k_ingroup, k_outgroup),
+    names_to  = "beneficiary",
+    values_to = "k"
+  ) |>
+  mutate(
+    beneficiary = factor(
+      recode(beneficiary, k_ingroup = "In-Group", k_outgroup = "Out-Group"),
+      levels = c("In-Group", "Out-Group")
+    ),
+    condition = factor(condition, levels = c("Control", "Treatment"))
+  )
+
+treat_sum_raw <- treat_data_raw |>
+  summarise(
+    mean_k = mean(k, na.rm = TRUE),
+    se_k   = sd(k, na.rm = TRUE) / sqrt(sum(!is.na(k))),
+    .by    = c(condition, beneficiary)
+  )
+
+treat_signif_df <- tibble(
+  group1      = c(0.825, 1.825),
+  group2      = c(1.175, 2.175),
+  label       = c("ns (b = \u22120.08)", "*** (b = \u22120.27)"),
+  y_position  = c(
+    max(treat_data_raw$k[treat_data_raw$beneficiary == "In-Group"],  na.rm = TRUE) * 1.05,
+    max(treat_data_raw$k[treat_data_raw$beneficiary == "Out-Group"], na.rm = TRUE) * 1.05
+  )
+)
+```
+
+```{r}
+#| fig-width: 5
+#| fig-height: 3
+#| fig-dpi: 600
+p_treat <- ggplot() +
+  geom_col(
+    data     = treat_sum_raw,
+    aes(x = beneficiary, y = mean_k, fill = condition),
+    position = position_dodge(width = 0.7),
+    color = "black", alpha = 0.6, width = 0.6
+  ) +
+  geom_jitter(
+    data     = treat_data_raw,
+    aes(x = beneficiary, y = k, fill = condition),
+    shape    = 21, color = "black",
+    position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.7),
+    alpha = 0.3, size = 0.9,
+    show.legend = FALSE
+  ) +
+  geom_errorbar(
+    data     = treat_sum_raw,
+    aes(x = beneficiary, ymin = mean_k - se_k, ymax = mean_k + se_k, group = condition),
+    position = position_dodge(width = 0.7),
+    width = 0.15, linewidth = 0.5,
+    show.legend = FALSE
+  ) +
+  geom_signif(
+    data        = treat_signif_df,
+    aes(xmin = group1, xmax = group2, annotations = label, y_position = y_position),
+    manual      = TRUE,
+    tip_length  = 0,
+    size        = 0.8,
+    textsize    = 3.5,
+    family      = "Public Sans",
+    color       = "black"
+  ) +
+  scale_fill_manual(values = condition_colors, name = NULL) +
+  scale_y_continuous(
+    limits = c(0, NA),
+    expand = expansion(mult = c(0, 0.15))
+  ) +
+  labs(title = "(B) Correcting Misperceptions", x = NULL, y = "Effort Discounting (K)") 
+
+p_treat
+```
+
+```{r}
+#| fig-width: 10
+#| fig-height: 4.5
+#| fig-dpi: 600
+showtext_opts(dpi = 600)
+
+fig_treat <- wrap_plots(
+    p_misperception, p_treat, guide_area(),
+    design  = c(area(1,1,1,3), area(1,4,1,5), area(2,1,2,5)),
+    heights = c(10, 1),
+    guides  = "collect"
+  )  &
+  theme(legend.title = element_blank(), legend.position = "bottom")
+
+fig_treat
+
+ggsave(here(fig_dir, "fig_treat.png"),
+       width = 10, height = 4.5, dpi = 600)
+```
+
+
+
+
+## Experiment Descriptives
+
+### 1. Random Assignment by Party
+
+```{r}
+survey_data |> 
+  select(Condition = condition,
+         Party = party) |> 
+  droplevels() |> 
+  datasummary_crosstab(Condition ~ Party, 
+                       data = _)
+```
+
+### 2. Misperceptions?
+
+```{r}
+# Build summary table
+underest_table <- survey_data |>
+  summarise(
+    N_total = n(),
+    N_under = sum(deviation < 0),
+    Pct_under = mean(deviation < 0) * 100,
+    .by = condition
+  ) |>
+  bind_rows(
+    survey_data |>
+      summarise(
+        condition = factor("Overall"),
+        N_total = n(),
+        N_under = sum(deviation < 0),
+        Pct_under = mean(deviation < 0) * 100
+      )
+  ) |>
+  arrange(condition)
+
+# Render with tinytable
+tt(underest_table,
+   digits = 1,
+   caption = "Participants underestimating out-party willingness (deviation < 0)") |>
+  setNames(c("Condition", "N (Total)", "N (Underestimated)", "% Underestimated")) |>
+  format_tt(j = 4, sprintf = "%.1f%%")
+```
+
+
+#### Democrats
+
+```{r}
+survey_data |> 
+  filter(party_preference == "Democrat",
+         condition == "Treatment") |> 
+  select(treat_est_dem_01) |> 
+  datasummary_skim()
+```
+
+#### Republicans
+
+```{r}
+survey_data |> 
+  filter(party_preference == "Republican",
+         condition == "Treatment") |> 
+  select(treat_est_rep_01) |> 
+  datasummary_skim()
+```
+
+### 3. Manipulation Checks
+
+```{r}
+survey_data |> 
+  filter(party == "Democrat",
+         condition == "Treatment") |> 
+  select(treat_dem_surprise, treat_dem_credible) |> 
+  mutate(across(c(everything()), as.numeric)) |> 
+  datasummary_skim()
+```
+
+```{r}
+survey_data |> 
+  filter(party == "Republican",
+         condition == "Treatment") |> 
+  select(treat_rep_surprise, treat_rep_credible) |> 
+  mutate(across(c(everything()), as.numeric)) |> 
+  datasummary_skim()
+```
+
+### Computational Model Fit
+
+Read relevant files
+```{r}
+fit_data_dir <- here("01_data", "models", "matlab_fit")
+fit <- read.csv(here(fit_data_dir, "PM_model_fit_statistics_full_democraticeffortdata.csv"))
+params <- read.csv(here(fit_data_dir, "EM_fit_parameters_full_democraticeffortdata_ms_two_k_one_beta_hyperbolic_labeled.csv"))
+```
+
+```{r}
+# Font for greek symbols
+font_add_google("Noto Sans", "noto")
+```
+
+Prepare data
+```{r}
+fit_plot_dat <- fit |>
+  mutate(
+    delta_bic = bicint - min(bicint),
+    model_label = case_when(
+      model_name == "ms_two_k_one_beta" ~ "2K1β\nParabolic",
+      model_name == "ms_two_k_one_beta_linear" ~ "2K1β\nLinear",
+      model_name == "ms_two_k_one_beta_hyperbolic" ~ "2K1β\nHyperbolic",
+      model_name == "ms_two_k_two_beta" ~ "2K2β\nParabolic",
+      model_name == "ms_two_k_two_beta_linear" ~ "2K2β\nLinear",
+      model_name == "ms_two_k_two_beta_hyperbolic" ~ "2K2β\nHyperbolic",
+      TRUE ~ model_name
+    )
+  ) |>
+  arrange(delta_bic) |>
+  mutate(model_label = factor(model_label, levels = model_label))
+
+winner_row <- fit |>
+  filter(model_name == "ms_two_k_one_beta_hyperbolic")
+
+winner_text <- paste0(
+  "Winning model\n\n",
+  "2K1β hyperbolic\n\n",
+  "BICint = ", format(round(winner_row$bicint, 0), big.mark = ","), "\n",
+  "ΔBIC = ", round(winner_row$relbic, 0), "\n",
+  "XP = ", sprintf("%.2f", winner_row$xp)
+)
+```
+
+```{r}
+#| fig-width: 4.5
+#| fig-height: 3.5
+#| fig-dpi: 600
+showtext_opts(dpi = 600)
+
+fit_plot <- ggplot(fit_plot_dat, aes(x = model_label, y = delta_bic, fill = model_label)) +
+  geom_col(width = 0.68, colour = "black") +
+  geom_text(
+    aes(label = round(delta_bic, 1)),
+    vjust = -0.35,
+    size = 3.5
+  ) +
+  annotate(
+    "label",
+    x    = 0.55,
+    y    = max(fit_plot_dat$delta_bic) * 1.12,
+    label = winner_text,
+    hjust = 0,
+    vjust = 1,
+    size        = 3,
+    linewidth = 0.35,
+    fill        = "grey96",
+    colour      = "grey25",
+    fontface    = "bold",
+    family      = "noto",
+    label.r     = unit(0.2, "lines"),
+    label.padding = unit(0.45, "lines")
+  ) +
+  coord_cartesian(
+    ylim = c(0, max(fit_plot_dat$delta_bic) * 1.12),
+    clip = "off"
+  ) +
+  scale_fill_manual(
+    values = rev(RColorBrewer::brewer.pal(9, "OrRd")[3:9]),
+    guide  = "none") +
+  labs(
+    title = NULL,
+    x = NULL,
+    y = expression(Delta * "BIC"[int])
+  ) +
+  theme_nice(base_size = 11) +
+  theme(
+    axis.title.y = element_text(family = "noto"),
+    axis.text.x  = element_text(
+      family     = "noto",
+      angle      = 30,
+      hjust      = 1,
+      vjust      = 1,
+      lineheight = 0.9
+    )
+  )
+
+fit_plot
+```
+
+```{r}
+reward_level <- 4
+
+curve_df <- combined_data |>
+  summarise(
+    `In-group`  = median(k_ingroup,  na.rm = TRUE),
+    `Out-group` = median(k_outgroup, na.rm = TRUE)
+  ) |>
+  pivot_longer(everything(), names_to = "beneficiary", values_to = "K") |>
+  crossing(effort = seq(0, 3, length.out = 200)) |>
+  mutate(
+    subjective_value = reward_level / (1 + K * effort),
+    beneficiary      = factor(beneficiary, levels = c("In-group", "Out-group"))
+  )
+```
+
+```{r}
+#| fig-width: 4.5
+#| fig-height: 3.5
+#| fig-dpi: 600
+showtext_opts(dpi = 600)
+
+curve_plot <- ggplot(curve_df, aes(x = effort, y = subjective_value, colour = beneficiary)) +
+  geom_line(linewidth = 1.2) +
+  scale_colour_manual(
+    values = c("In-group" = "#1B9E91", "Out-group" = "#E97B32")
+  ) +
+  scale_x_continuous(limits = c(0, 3), breaks = 0:3) +
+  labs(
+    x      = "Effort level",
+    y      = "Subjective value",
+    colour = NULL
+  ) +
+  guides(
+    colour = guide_legend(override.aes = list(linewidth = 2))
+  ) +
+  theme_nice(base_size = 13) +
+  theme(legend.position = "bottom")
+
+curve_plot
+```
+
+```{r}
+#| fig-width: 4.5
+#| fig-height: 7
+#| fig-dpi: 600
+showtext_opts(dpi = 600)
+
+(fit_plot + theme(plot.margin = margin(t = 5, r = 5, b = 20, l = 5))) / curve_plot +
+  plot_annotation(
+    title = "(B)",
+    theme = theme(plot.title = element_text(face = "bold", size = 12))
+  ) 
+
+ggsave(
+  here(fig_dir, "fit_curve.svg"),
+  height = 7,
+  width  = 4.5,
+  dpi    = 600
+)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

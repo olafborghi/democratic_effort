@@ -1,0 +1,422 @@
+---
+title: "Democratic Effort Power Analyses"
+format:
+  html:
+    theme: paper
+    code-tools: true
+    code-fold: true
+    toc: true
+    toc-fold: false
+    toc-location: right
+    toc-depth: 3
+    toc-title: "Contents"
+embed-resources: true
+warning: false
+---
+
+```{r}
+#| include: false
+# set error messages to English
+Sys.setenv(LANG = "en")
+
+knitr::opts_chunk$set(
+  fig.align = "center", 
+  fig.retina = 3,
+  fig.width = 6, 
+  fig.height = (6 * 0.618),
+  out.width = "90%", 
+  collapse = FALSE
+)
+
+options(
+  digits = 4,
+  width = 300,
+  dplyr.summarise.inform = FALSE)
+```
+
+```{r}
+#| include: false
+#| warning: true
+#| message: true
+if (!require("groundhog", quietly = TRUE)) {
+  install.packages("groundhog")
+}
+library("groundhog")
+
+# use groundhog to install and load packages
+pkgs <- c("here",         # System path management
+          "tidyverse",    # ggplot, dplyr, %>%, and friends
+          "DeclareDesign",    # Tools to plan, implement, analyze empirical research
+          "modelsummary", # Data and model summaries with tables and plots
+          "tinytable",    # Lightweight package to create tables
+          "afex",         # Interface for (general) linear mixed models
+          "marginaleffects",      # Compute marginal means, slopes, predictions, etc.
+          "ggdist",       # Additional plot elements
+          "patchwork",    # Combine multiple ggplots
+          "showtext",     # Additional fonts for plots etc
+          "tictoc"        # Timing functions
+          )
+
+groundhog.library(pkgs, "2026-01-01")
+```
+
+```{r}
+#| include: false
+
+showtext_auto()
+showtext_opts(dpi = 600) # change to 96 on Windows
+
+font_add_google("Public Sans", "Public Sans")
+font_add_google("Public Sans", "Public Sans Light", regular.wt = 300)
+font_add_google("Public Sans", "Public Sans Semibold", regular.wt = 600)
+
+# Custom ggplot theme
+theme_nice <- function(base_size = 14) {
+  # General text family and base size
+  theme_minimal(base_family = "Public Sans", base_size = base_size) +
+    theme(
+      # Remove minor grid lines for cleaner look
+      panel.grid.minor = element_blank(),
+      # Customize major grid lines color
+      panel.grid.major = element_blank(),
+      # Plot title: bold and custom relative size
+      plot.title = element_text(family = "Public Sans", face = "bold", size = rel(1.1), margin = margin(b = 10)),
+      # Subtitle and caption: lighter weight 
+      plot.subtitle = element_text(family = "Public Sans Light", face = "plain"),
+      plot.caption = element_text(family = "Public Sans Light", face = "plain"),
+      # Axis text: Relative size
+      axis.text = element_text(size = rel(0.9)),
+      # Axis titles: Semibold and custom relative size
+      axis.title = element_text(family = "Public Sans Semibold", size = rel(0.9)),
+      axis.title.x = element_text(hjust = 0.5),
+      axis.title.y = element_text(hjust = 0.5),
+      # Axis lines
+      axis.line = element_line(color = "grey25", linewidth = 0.8),
+      # Facet labels: bold text on grey background
+      strip.text = element_text(
+        family = "Public Sans Semibold", face = "plain",
+        size = rel(1),
+        hjust = 0.5
+      ),
+      strip.background = element_rect(fill = "grey95", color = "grey25", linewidth = 0.8), 
+      # Legend styling: compact and top-positioned
+      legend.title = element_text(family = "Public Sans Semibold", size = rel(0.8)),
+      legend.text = element_text(size = rel(0.8)),
+      legend.position = "top",
+      legend.justification = "center",
+      legend.title.position = "left",
+      legend.margin = margin(l = 0, t = 0)
+    )
+}
+
+theme_set(theme_nice())
+update_geom_defaults("text", list(family = "Public Sans"))
+update_geom_defaults("label", list(family = "Public Sans"))
+```
+
+# Democratic Effort Task Power Analyses 
+
+We want to simulate data to calculate the power to reliably detect within-subject differences of Cohens D = 0.20 in k between the in-group and the out-group conditions. 
+
+## 1. Power to detect k_ingroup - k_outgroup given the smallest effect size of interest of Cohens D = 0.20
+
+### Setup 
+
+Declare the model
+```{r}
+# Parameters
+N <- 100  # Sample size
+cohens_d <- 0.20  # Smallest effect size of interest
+sd_diff <- 1  # SD of difference scores (standardized)
+mean_diff <- cohens_d * sd_diff  # Mean difference = 0.20
+
+# Declare model: within-subject design
+model <- declare_model(
+  N = N,
+  # Generate individual difference scores (k_ingroup - k_outgroup)
+  # Mean = 0.20, SD = 1 gives Cohen's d = 0.20
+  diff = rnorm(N, mean = mean_diff, sd = sd_diff),
+  
+  # Generate k_ingroup (arbitrary mean/SD)
+  k_ingroup = rnorm(N, mean = 0, sd = 1),
+  
+  # Calculate k_outgroup so difference is as specified
+  k_outgroup = k_ingroup - diff
+)
+
+```
+
+Declare the inquiry (estimate)
+```{r}
+inquiry <- declare_inquiry(
+  ATE = mean(k_ingroup - k_outgroup)
+)
+```
+
+Declare the estimator (paired t-test)
+```{r}
+estimator <- declare_estimator(
+  handler = label_estimator(function(data) {
+    test <- t.test(data$k_ingroup, data$k_outgroup, paired = TRUE)
+    
+    tibble(
+      estimate = test$estimate,
+      statistic = test$statistic,
+      p.value = test$p.value,
+      conf.low = test$conf.int[1],
+      conf.high = test$conf.int[2]
+    )
+  }),
+  inquiry = "ATE",
+  label = "paired_t_test"
+)
+```
+
+Declare the diagnosands
+```{r}
+diagnosands <- declare_diagnosands(
+  mean_estimate = mean(estimate),
+  power = mean(p.value < 0.05),
+  ci_lower = mean(conf.low, na.rm = TRUE),
+  ci_upper = mean(conf.high, na.rm = TRUE)
+)
+```
+
+Put the design together
+```{r}
+design_diff = model + inquiry + estimator
+
+# Test simulation
+diagnose_design(design_diff, 
+                sims = 1000,
+                diagnosands = diagnosands)
+```
+
+### Simulation
+
+```{r}
+#| warning: false
+#| message: false
+designs_list_diff <- redesign(design_diff,
+                         N = seq(50, 300, by = 50)
+   )
+
+n_sim = 5000
+
+cat("Running", length(designs_list_diff), "designs with", n_sim, "simulations each...\n")
+cat("Total simulations:", length(designs_list_diff) * n_sim, "\n")
+
+tic("Sensitivity analysis")
+diagnosis_diff <- diagnose_design(designs_list_diff, 
+                                  sims = n_sim,
+                                  diagnosands = diagnosands)
+toc()
+```
+
+### Visualisation
+
+```{r}
+#| fig-height: 4 
+#| fig-width: 5.5 
+#| fig-dpi: 600
+fig_diff_data <- diagnosis_diff$diagnosands_df |> 
+  rename("Cohen's d" = mean_estimate,
+         "SE(Cohen's d)" = `se(mean_estimate)`)
+
+fig_diff <- fig_diff_data |>
+  ggplot(aes(x = N, y = power)) +
+  geom_line(color = "firebrick3", 
+            linewidth = 1) +
+  geom_point(color = "firebrick3",
+             size = 2) +
+  geom_hline(yintercept = 0.90,
+             linetype = "dashed",
+             color = "black",
+             linewidth = 0.8) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1),
+                     limits = c(0.2, 1),
+                     breaks = seq(0, 1, by = 0.1)) +
+  scale_x_continuous(breaks = seq(50, 300, by = 50)) +
+  labs(title = "Power to detect Cohen's d = 0.20",
+       x = "Sample size (N)",
+       y = "Power") +
+  theme_nice() +
+  theme(legend.position = "none",
+      # panel.grid.minor = element_blank(),
+      panel.grid.major.x = element_blank(),
+      axis.line = element_line(color = "grey25", linewidth = 0.6),
+      axis.ticks = element_line(color = "grey25", linewidth = 0.6),
+      axis.ticks.length = unit(0.2, "cm"))
+
+fig_diff
+```
+
+```{r}
+diff_sim_table <- fig_diff_data |> 
+  transmute("Sample size (N)" = N,
+            "Cohen's d" = round(`Cohen's d`, 2),
+            "Power" = power,
+            "SE" = `se(power)`) |> 
+  tt(theme = "striped",
+     notes = c("Power diagnosis based on 5000 simulations. Power estimates with bootstrapped standard errors."))
+
+diff_sim_table
+```
+
+## 2. Power to detect correlation between k_all and between-subject variables
+
+### Setup
+
+Declare the model
+```{r}
+# Parameters
+N <- 100  # Sample size
+r <- 0.20  # Correlation coefficient
+
+model_corr <- declare_model(
+  N = N,
+  X = rnorm(N, mean = 0, sd = 1),  # Between-subject predictor
+  k_all = correlate(given = X, rho = r, rnorm, mean = 0, sd = 1)  # Correlated k_all
+)
+
+# Declare the inquiry (true correlation)
+inquiry_corr <- declare_inquiry(
+  correlation = r
+)
+```
+
+Declare the estimator
+```{r}
+# Declare the estimator (linear regression)
+estimator_corr <- declare_estimator(
+  handler = label_estimator(function(data) {
+    model <- lm(k_all ~ X, data = data)
+    coef_summary <- summary(model)$coefficients
+    
+    tibble(
+      estimate = coef_summary["X", "Estimate"],
+      statistic = coef_summary["X", "t value"],
+      p.value = coef_summary["X", "Pr(>|t|)"],
+      se = coef_summary["X", "Std. Error"],
+      conf.low = estimate - 1.96 * se,
+      conf.high = estimate + 1.96 * se
+    )
+  }),
+  inquiry = "correlation",
+  label = "lm"
+)
+```
+
+Declare the diagnosands
+```{r}
+diagnosands_corr <- declare_diagnosands(
+  mean_estimate = mean(estimate),
+  power = mean(p.value < 0.05),
+  ci_lower = mean(conf.low, na.rm = TRUE),
+  ci_upper = mean(conf.high, na.rm = TRUE)
+)
+```
+
+Put the design together
+```{r}
+design_corr <- model_corr + inquiry_corr + estimator_corr
+
+# Test simulation
+diagnose_design(design_corr, 
+                sims = 1000,
+                diagnosands = diagnosands_corr)
+```
+
+### Simulation
+
+```{r}
+#| warning: false
+#| message: false
+
+designs_list_corr <- redesign(design_corr,
+                              N = seq(50, 300, by = 50),
+                              r = seq(0.10, 0.2, by = 0.1))
+
+n_sim <- 5000
+cat("Running", length(designs_list_corr), "designs with", n_sim, "simulations each...\n")
+cat("Total simulations:", length(designs_list_corr) * n_sim, "\n")
+
+tic("Correlation power analysis")
+diagnosis_corr <- diagnose_design(designs_list_corr, 
+                                  sims = n_sim,
+                                  diagnosands = diagnosands_corr)
+toc()
+```
+
+```{r}
+#| fig-height: 4 
+#| fig-width: 5.5 
+#| fig-dpi: 600
+fig_corr_data <- diagnosis_corr$diagnosands_df |> 
+  rename("Correlation (r)" = mean_estimate,
+         "SE(r)" = `se(mean_estimate)`)
+
+fig_corr <- fig_corr_data |>
+  ggplot(aes(x = N, y = power)) +
+  geom_line(color = "firebrick3", 
+            linewidth = 1) +
+  geom_point(color = "firebrick3",
+             size = 2) +
+  geom_hline(yintercept = 0.90,
+             linetype = "dashed",
+             color = "black",
+             linewidth = 0.8) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1),
+                     limits = c(0, 1),
+                     breaks = seq(0, 1, by = 0.2)) +
+  scale_x_continuous(breaks = seq(50, 300, by = 50)) +
+  labs(title = "Power to detect correlations with k_all",
+       x = "Sample size (N)",
+       y = "Power") +
+  facet_wrap(~r, labeller = labeller(r = function(x) paste0("r = ", x))) +
+  theme_nice() +
+  theme(legend.position = "none",
+        panel.grid.major.x = element_blank(),
+        axis.line = element_line(color = "grey25", linewidth = 0.6),
+        axis.ticks = element_line(color = "grey25", linewidth = 0.6),
+        axis.ticks.length = unit(0.2, "cm"))
+
+fig_corr
+```
+
+```{r}
+corr_sim_table <- fig_corr_data |> 
+  transmute("Sample size (N)" = N,
+            "Correlation (r)" = r,
+            "Estimated r" = round(`Correlation (r)`, 2),
+            "Power" = power,
+            "SE" = `se(power)`) |> 
+  tt(theme = "striped",
+     notes = c("Power diagnosis based on 5000 simulations. Power estimates with bootstrapped standard errors."))
+
+corr_sim_table
+```
+
+```{r}
+#| fig-height: 8 
+#| fig-width: 6 
+#| fig-dpi: 600
+final_fig <- fig_diff / fig_corr + 
+  plot_layout(heights = c(1, 1.2)) +
+  plot_annotation(tag_levels = 'A')
+
+# ggsave(here(sim_dir, "simulation_results.png"), 
+#        plot = final_fig,
+#        height = 10, 
+#        width = 9, 
+#        dpi = 600)
+
+final_fig
+```
+
+
+
+
+
+
+

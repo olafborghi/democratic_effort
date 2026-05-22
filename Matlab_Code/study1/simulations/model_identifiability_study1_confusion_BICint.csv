@@ -1,0 +1,7 @@
+Row,ms_three_k_one_beta,ms_three_k_one_beta_linear,ms_three_k_one_beta_hyperbolic,ms_three_k_three_beta,ms_three_k_three_beta_linear,ms_three_k_three_beta_hyperbolic
+ms_three_k_one_beta,10,0,0,0,0,0
+ms_three_k_one_beta_linear,0,10,0,0,0,0
+ms_three_k_one_beta_hyperbolic,0,0,10,0,0,0
+ms_three_k_three_beta,6,0,0,4,0,0
+ms_three_k_three_beta_linear,0,0,0,0,10,0
+ms_three_k_three_beta_hyperbolic,0,0,1,0,0,9

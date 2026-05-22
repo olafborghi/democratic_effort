@@ -1,0 +1,198 @@
+---
+title: "Democratic Effort Study 1: Computational Modelling Data Preparation & Merging"
+format:
+  html:
+    theme: paper
+    code-tools: true
+    code-fold: true
+    toc: true
+    toc-fold: false
+    toc-location: right
+    toc-depth: 3
+    toc-title: "Contents"
+embed-resources: true
+warning: false
+---
+
+```{r}
+#| include: false
+# set error messages to English
+Sys.setenv(LANG = "en")
+
+knitr::opts_chunk$set(
+  fig.align = "center", 
+  fig.retina = 3,
+  fig.width = 6, 
+  fig.height = (6 * 0.618),
+  out.width = "90%", 
+  collapse = FALSE
+)
+
+options(
+  digits = 4,
+  width = 300,
+  dplyr.summarise.inform = FALSE)
+```
+
+```{r}
+#| include: false
+#| warning: true
+#| message: true
+if (!require("groundhog", quietly = TRUE)) {
+  install.packages("groundhog")
+}
+library("groundhog")
+
+# use groundhog to install and load packages
+pkgs <- c("here",         # System path management
+          "tidyverse",    # ggplot, dplyr, %>%, and friends
+          "modelsummary"  # Data and model summaries
+          )
+
+groundhog.library(pkgs, "2026-01-01")
+```
+
+```{r}
+#| include: false
+data_dir <- here("01_data")
+data_mod_dir <- here(data_dir, "models")
+data_final_dir <- here(data_dir, "final")
+
+dir.create(data_mod_dir, recursive = TRUE, showWarnings = TRUE)
+dir.create(here(data_mod_dir, "prep"), recursive = TRUE, showWarnings = TRUE)
+dir.create(here(data_final_dir), recursive = TRUE, showWarnings = TRUE)
+```
+
+```{r}
+load(here(data_dir, "clean", "demeffort_survey_data.RData"))
+load(here(data_dir, "clean", "demeffort_combined_data.RData"))
+```
+
+### Data preparations
+
+Select relevant variables
+```{r}
+model_data <- combined_data_exc |> 
+  select(PID, agent, eff, rew, decision)
+```
+
+Recode the levels
+```{r}
+model_data <- model_data |>
+  mutate(
+    eff = case_when(
+      eff == "easy65" ~ 2,
+      eff == "hard80" ~ 3,
+      eff == "hard95" ~ 4
+    ),
+    rew = case_when(
+      rew == "4" ~ 2,
+      rew == "12" ~ 3,
+      rew == "20" ~ 4
+    )
+  )
+
+model_data |> 
+  select(eff, rew) |> 
+  unique()
+```
+
+## Save the separate csv to run models in Matlab
+
+```{r}
+model_data |>
+  select(PID, agent, eff, rew, decision) |>
+  filter(!is.na(decision)) |> 
+  group_nest(PID) |>
+  pwalk(~ write_csv(.y, 
+                    file = here(data_mod_dir, "prep", paste0(.x, "_behaviour.csv"))))
+```
+
+## Run models in Matlab 
+
+See separate folder for details
+
+## Merge data with parameters from Matlab
+
+```{r}
+matlab_pars_raw <- read_csv(here(data_mod_dir, "matlab_pars", "EM_fit_parameters_full_democraticeffortdata_ms_three_k_one_beta_hyperbolic_labeled.csv"))
+
+matlab_pars <- matlab_pars_raw |> 
+  rename(PID = ID,
+         k_all = all_k, 
+         k_rural = rural_k, 
+         k_urban = urban_k) 
+
+matlab_pars <- matlab_pars |> 
+  left_join(survey_data_exc |> select(PID, party_preference), by = "PID")
+```
+
+### Calculate in / outgroup and difference
+
+```{r}
+matlab_pars <- matlab_pars |>
+  mutate(
+    # Create ingroup/outgroup k values based on party preference
+    k_ingroup = case_when(
+      party_preference == "Democrat" ~ k_urban,
+      party_preference == "Republican" ~ k_rural,
+      .default = NA_real_
+    ),
+    k_outgroup = case_when(
+      party_preference == "Democrat" ~ k_rural,
+      party_preference == "Republican" ~ k_urban,
+      .default = NA_real_
+    ),
+    
+    # Create difference scores for k
+    k_outgroup_ingroup = k_outgroup - k_ingroup, # Higher values mean stronger relative discounting of outgroup over ingroup 
+    k_all_ingroup = k_all - k_ingroup, # Higher values means stronger relative discounting of all over ingroup
+    k_outgroup_all = k_outgroup - k_all, # Higher values means stronger relative discounting of outgroup over all
+    
+    # Create k_mean
+    k_mean = (k_all + k_ingroup + k_outgroup) / 3
+    
+  ) |> 
+  # remove party preference variable
+  select(-party_preference)
+```
+
+```{r}
+matlab_pars |> 
+  select(k_all:k_mean, beta) |> 
+  datasummary_skim()
+```
+
+## Merge computational modelling parameters to data
+
+```{r}
+survey_data <- survey_data_exc |> 
+  left_join(matlab_pars, by = "PID") |> 
+  select(PROLIFIC_PID:income, 
+         k_all, k_rural, k_urban, k_ingroup, k_outgroup,
+         k_mean, k_outgroup_ingroup, k_all_ingroup, k_outgroup_all, 
+         beta,
+         bipartisanship_01:work_difference)
+```
+
+```{r}
+combined_data <- combined_data_exc |> 
+  left_join(matlab_pars, by = "PID") |> 
+  select(PID:success,
+         k_all, k_rural, k_urban, k_ingroup, k_outgroup,
+         k_mean, k_outgroup_ingroup, k_all_ingroup, k_outgroup_all,
+         beta,
+         max_boxes:work_difference)
+```
+
+## Save final data for descriptives & regressions in R
+
+```{r}
+# survey data (for exploration/correlation)
+write_csv(survey_data, here(data_final_dir, "demeffort_survey_data.csv"))
+save(survey_data, file = here(data_final_dir, "demeffort_survey_data.RData"))
+# combined data (for regression models)
+write_csv(combined_data, here(data_final_dir, "demeffort_combined_data.csv"))
+save(combined_data, file = here(data_final_dir, "demeffort_combined_data.RData"))
+```
+

@@ -1,0 +1,10 @@
+simulated_parameter,recovered_parameter,simulated_parameter_index,recovered_parameter_index,pearson_r
+k_agent1,k_agent1,1,1,0.786632881153367
+k_agent1,k_agent2,1,2,0.0533048056060349
+k_agent1,beta,1,3,-0.0803548343122469
+k_agent2,k_agent1,2,1,-0.060039143447283
+k_agent2,k_agent2,2,2,0.823550901374975
+k_agent2,beta,2,3,-0.0348825155828489
+beta,k_agent1,3,1,-0.125621836002041
+beta,k_agent2,3,2,-0.0609451637122201
+beta,beta,3,3,0.778353450943072

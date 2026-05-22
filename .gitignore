@@ -1,0 +1,27 @@
+# macOS
+.DS_Store
+
+# R / RStudio
+.Rhistory
+.Rapp.history
+.RData
+.Ruserdata
+.Rproj.user/
+
+# Quarto build artifacts
+/.quarto/
+*_cache/
+*_files/
+
+# tinytable PNG assets (HTML output is self-contained)
+tinytable_assets/
+
+# MATLAB
+*.asv
+*.m~
+slprj/
+
+# Editor / local
+.vscode/
+.idea/
+.claude/

@@ -1,0 +1,340 @@
+---
+title: "Democratic Effort Study 1: Logistic Regressions"
+format:
+  html:
+    theme: paper
+    code-tools: true
+    code-fold: true
+    toc: true
+    toc-fold: false
+    toc-location: right
+    toc-depth: 3
+    toc-title: "Contents"
+embed-resources: true
+warning: false
+---
+
+```{r}
+#| include: false
+# set error messages to English
+Sys.setenv(LANG = "en")
+
+knitr::opts_chunk$set(
+  fig.align = "center", 
+  fig.retina = 3,
+  fig.width = 6, 
+  fig.height = (6 * 0.618),
+  out.width = "90%", 
+  collapse = FALSE
+)
+
+options(
+  digits = 4,
+  width = 300,
+  dplyr.summarise.inform = FALSE)
+```
+
+```{r}
+#| include: false
+#| warning: true
+#| message: true
+if (!require("groundhog", quietly = TRUE)) {
+  install.packages("groundhog")
+}
+library("groundhog")
+
+# use groundhog to install and load packages
+pkgs <- c("here",         # System path management
+          "tidyverse",    # ggplot, dplyr, %>%, and friends
+          "modelsummary", # Data and model summaries with tables and plots
+          "tinytable",    # Lightweight package to create tables
+          "afex",         # Interface for (general) linear mixed models
+          "broom.mixed",  # Get tidy model objects
+          "marginaleffects"  # Compute marginal means, slopes, predictions, etc.
+          )
+
+groundhog.library(pkgs, "2026-01-01")
+```
+
+```{r}
+#| include: false
+data_dir <- here("01_data", "final") 
+table_dir <- here("02_output", "tables", "log_regressions") 
+
+dir.create(table_dir, recursive = TRUE, showWarnings = TRUE)
+```
+
+# Democratic Effort Task Regressions
+
+## Load and prepare data
+
+```{r}
+load(here(data_dir, "demeffort_survey_data.RData")) 
+load(here(data_dir, "demeffort_combined_data.RData"))
+```
+
+## Generalised linear mixed models
+
+Modelling strategy:
+
+1.  Fix maximum models (Barr et al., 2013)
+
+2.  If models don't converge:
+
+    1.  Remove the correlations between random slope and intercept
+
+    2.  Remove interactions between random slope effects
+
+    3.  Remove random slope effects with a variance close to 0
+
+    4.  Run models only including a random intercept
+
+```{r}
+model_data <- combined_data |> 
+  mutate(rew = factor(rew, levels = c(4, 12, 20))) |> 
+  filter(!is.na(decision))
+```
+
+### Model 1: Full in-group / out-group / all model
+
+```{r}
+# Error: number of observations (=7161) < number of random effects (=7668)
+# m1.full <- mixed(decision ~ benefit * eff * rew + (1 + benefit * eff * rew | PID), 
+#             data = model_data, 
+#             family = binomial, 
+#             method = "LRT",
+#             control = glmerControl(optimizer = "bobyqa", optCtrl=list(maxfun=2e5)), 
+#             return = "merMod", 
+#             expand_re = T) 
+# 
+# summary(m1.full)
+```
+
+```{r}
+# Model failed to converge: degenerate  Hessian with 2 negative eigenvalues
+# m1.nocorr <- mixed(decision ~ benefit * eff * rew + (1 + benefit * eff * rew || PID),
+#             data = model_data,
+#             family = binomial,
+#             method = "LRT",
+#             control = glmerControl(optimizer = "bobyqa", optCtrl=list(maxfun=2e5)),
+#             return = "merMod",
+#             expand_re = T)
+# 
+# summary(m1.nocorr)
+```
+
+```{r}
+# Model failed to converge with max|grad| = 0.347206 (tol = 0.002, component 1)
+# m1.noint <- mixed(decision ~ benefit * eff * rew + (1 + benefit + eff + rew || PID),
+#             data = model_data,
+#             family = binomial,
+#             method = "LRT",
+#             control = glmerControl(optimizer = "bobyqa", optCtrl=list(maxfun=2e5)),
+#             return = "merMod",
+#             expand_re = T)
+# 
+# summary(m1.noint)
+```
+
+```{r}
+m1 <- mixed(decision ~ benefit * eff * rew + (1 + benefit | PID), 
+            data = model_data, 
+            family = binomial, 
+            method = "LRT",
+            control = glmerControl(optimizer = "bobyqa", optCtrl=list(maxfun=2e5)), 
+            return = "mixed", 
+            expand_re = T) 
+```
+
+```{r}
+anova_table <- m1$anova_table |>
+  as_tibble(rownames = "Effect") |>
+  select(
+    Effect,
+    df   = `Chi Df`,
+    Chi2 = Chisq,
+    p    = `Pr(>Chisq)`
+  ) |>
+  mutate(
+    Effect = Effect |>
+      str_replace_all("benefit", "Beneficiary") |>
+      str_replace_all("rew",     "Reward") |>
+      str_replace_all("eff",     "Effort"),
+    Chi2 = sprintf("%.2f", Chi2),
+    p    = ifelse(p < .001, "< .001", sprintf("%.3f", p))
+  )
+
+anova_table |>
+  tt()
+
+anova_table |>
+  tt() |>
+  save_tt(here(table_dir, "anova_table.docx"), overwrite = TRUE)
+```
+
+```{r}
+contrasts(m1$data$benefit)
+contrasts(m1$data$eff)
+contrasts(m1$data$rew)
+```
+
+
+```{r}
+m1.mer <- m1$full_model
+
+relabel_terms <- function(x) {
+  x |>
+    str_replace_all("benefit1", "Everyone") |>
+    str_replace_all("benefit2", "Ingroup") |>
+    str_replace_all("eff1",     "Effort Level 1") |>
+    str_replace_all("eff2",     "Effort Level 2") |>
+    str_replace_all("rew1",     "4 Credits") |>
+    str_replace_all("rew2",     "12 Credits") |>
+    str_replace_all(":",        " \u00d7 ")
+}
+
+fe <- tidy(m1.mer, effects = "fixed", conf.int = TRUE) |>
+  mutate(
+    term = relabel_terms(term),
+    term = case_when(
+      term == "(Intercept)"                              ~ term,
+      str_detect(term, "\u00d7")                         ~ term,
+      term %in% c("Everyone", "Ingroup")                 ~ paste0("Beneficiary: ", term),
+      term %in% c("Effort Level 1", "Effort Level 2")    ~ paste0("Effort: ", term),
+      term %in% c("4 Credits", "12 Credits")             ~ paste0("Reward: ", term),
+      TRUE                                               ~ term
+    )
+  ) |>
+  transmute(
+    Term     = term,
+    Estimate = sprintf("%.3f", estimate),
+    SE       = sprintf("%.3f", std.error),
+    z        = sprintf("%.2f", statistic),
+    `95% CI` = paste0("[", sprintf("%.3f", conf.low), ", ", sprintf("%.3f", conf.high), "]"),
+    p        = ifelse(p.value < .001, "< .001", sprintf("%.3f", p.value))
+  )
+
+re <- tidy(m1.mer, effects = "ran_pars") |>
+  mutate(
+    term = term |>
+      str_replace_all("re1\\.benefit1", "Everyone") |>
+      str_replace_all("re1\\.benefit2", "Ingroup") |>
+      str_replace_all("sd__\\(Intercept\\)",                     "SD (Intercept)") |>
+      str_replace_all("sd__Everyone",                            "SD (Everyone)") |>
+      str_replace_all("sd__Ingroup",                             "SD (Ingroup)") |>
+      str_replace_all("cor__\\(Intercept\\)\\.Everyone",         "Cor (Intercept, Everyone)") |>
+      str_replace_all("cor__\\(Intercept\\)\\.Ingroup",          "Cor (Intercept, Ingroup)") |>
+      str_replace_all("cor__Everyone\\.Ingroup",                 "Cor (Everyone, Ingroup)")
+  ) |>
+  transmute(
+    Term     = term,
+    Estimate = sprintf("%.3f", estimate),
+    SE       = "",
+    z        = "",
+    `95% CI` = "",
+    p        = ""
+  )
+
+n_fe <- nrow(fe)
+lmm_table <- bind_rows(fe, re) |>
+  tt(notes = "Sum-to-zero (deviation) contrast coding applied to all factors; coefficients represent deviation from the grand mean. Implicit reference levels (coded as the negative sum of displayed contrasts): Beneficiary = Out-group; Effort = Level 3; Reward = 20 Credits.") |>
+  group_tt(
+    i = list(
+      "Fixed Effects"                = 1,
+      "Random Effects (Participant)" = n_fe + 1
+    )
+  ) |>
+  style_tt(i = c(1, n_fe + 2), bold = TRUE)
+
+lmm_table
+
+lmm_table |>
+  save_tt(here(table_dir, "lmm_table.docx"), overwrite = TRUE)
+```
+
+### Model-based predictions
+
+```{r}
+m1.ben.means <- avg_predictions(m1.mer, 
+                                variables = "benefit",
+                                re.form=NA) |> 
+  as_tibble() |> 
+  select(Condition = benefit, 
+         Estimate = estimate, 
+         SE = std.error,
+         "t" = statistic,
+         "p" = p.value,
+         "95% CI Low" = conf.low,
+         "95% CI High" = conf.high)
+
+m1.eff.means <- avg_predictions(m1.mer, 
+                                variables = "eff",
+                                re.form=NA) |> 
+  as_tibble() |> 
+  select(Condition = eff, 
+         Estimate = estimate, 
+         SE = std.error,
+         "t" = statistic,
+         "p" = p.value,
+         "95% CI Low" = conf.low,
+         "95% CI High" = conf.high) 
+
+m1.rew.means <- avg_predictions(m1.mer, 
+                                variables = "rew",
+                                re.form=NA) |> 
+  as_tibble() |> 
+  select(Condition = rew, 
+         Estimate = estimate, 
+         SE = std.error,
+         "t" = statistic,
+         "p" = p.value,
+         "95% CI Low" = conf.low,
+         "95% CI High" = conf.high)
+
+
+m1.means <- bind_rows(m1.ben.means, m1.eff.means, m1.rew.means) |> 
+  mutate(
+    across(where(is.numeric) & !matches("p"), ~ round(.x, 3)),  # Round all numeric except p
+    p = ifelse(round(p, 3) == 0, "< .001", as.character(round(p, 3)))  # Special handling for p
+  )
+
+m1.means |> 
+  tt() 
+
+m1.means |> 
+  tt() |> 
+  save_tt(here(table_dir, "model_means.docx"), overwrite = TRUE)
+```
+
+### Model-based comparisons
+
+#### Main pre-registered quantities of interest
+
+```{r}
+m1.comparisons <- avg_comparisons(m1.mer, 
+                                  variables = list(benefit = "pairwise",
+                                                   eff = "pairwise",
+                                                   rew = "pairwise"),
+                                  re.form=NA) |> 
+  as_tibble() |> 
+  select(Contrast = contrast, 
+         Estimate = estimate, 
+         SE = std.error,
+         "t" = statistic,
+         "p" = p.value,
+         "95% CI Low" = conf.low,
+         "95% CI High" = conf.high) |> 
+  mutate(
+    across(where(is.numeric) & !matches("p"), ~ round(.x, 3)),  # Round all numeric except p
+    p = ifelse(round(p, 3) == 0, "< .001", as.character(round(p, 3)))  # Special handling for p
+  )
+
+m1.comparisons |> 
+  tt() 
+
+m1.comparisons |> 
+  tt() |> 
+  save_tt(here(table_dir, "model_comparisons.docx"), overwrite = TRUE)
+```
+
+

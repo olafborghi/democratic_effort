@@ -1,0 +1,17 @@
+simulated_parameter,recovered_parameter,simulated_parameter_index,recovered_parameter_index,pearson_r
+k_agent1,k_agent1,1,1,0.808048356167209
+k_agent1,k_agent2,1,2,-0.0162646658070431
+k_agent1,k_agent3,1,3,-0.0167629617037609
+k_agent1,beta,1,4,-0.0711977569329287
+k_agent2,k_agent1,2,1,-0.0369002690011692
+k_agent2,k_agent2,2,2,0.818774915186112
+k_agent2,k_agent3,2,3,0.00236187311894857
+k_agent2,beta,2,4,-0.0710530568646377
+k_agent3,k_agent1,3,1,-0.0197524929053481
+k_agent3,k_agent2,3,2,0.0173736533606003
+k_agent3,k_agent3,3,3,0.8058040972771
+k_agent3,beta,3,4,-0.0589064074692612
+beta,k_agent1,4,1,-0.111726731107199
+beta,k_agent2,4,2,-0.0536308741301356
+beta,k_agent3,4,3,-0.108175138085101
+beta,beta,4,4,0.813136018392008
